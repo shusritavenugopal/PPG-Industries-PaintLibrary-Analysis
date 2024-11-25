@@ -1,0 +1,369 @@
+---
+title: "INFSCI 2595 Spring 2024 Final Project Part 4"
+author: "ShusritaVenugopal"
+date: "2024-04-19"
+output: html_document
+---
+
+# Part iv: Interpretation – ivA) Input Importance
+
+#### Loading all the best models and train_data identified in Part 1
+```{r}
+library(dplyr)
+
+train_dataset <- readr::read_rds("my_train_data.rds")
+df <- readr::read_rds("df.rds")
+viz_grid <- readr::read_rds("viz_grid.rds")
+```
+#### Part 2: best models:
+```{r}
+mod_lmc_10 <- readr::read_rds("mod_lmc_10.rds")
+
+enet_tune_10 <- readr::read_rds("enet_tune_10.rds")
+
+gam_tune <- readr::read_rds("gam_tune.rds")
+```
+
+#### Part 3: best models
+```{r}
+modB_default <- readr::read_rds("modB_default.rds")
+modF_glmn_default <- readr::read_rds("modF_glmn_default.rds")
+gam_tune <- readr::read_rds("gam_tune.rds")
+```
+
+#### Identify the best regression model:
+
+```{r}
+# Create a data frame with model names and their RMSE values
+model_rmse <- data.frame(
+  Model = c("Linear Regression", "glmnet", "Generalized Additive Model"),
+  RMSE = c(0.06381023, 0.05778489, 0.8622984)  # Replace with your actual RMSE values
+)
+
+# Find the model with the smallest RMSE
+smallest_rmse_model <- model_rmse[which.min(model_rmse$RMSE), ]
+
+# Print the model with the smallest RMSE
+print(smallest_rmse_model)
+```
+*The best regression model is enet_tune_10 with the lowest RMSE values.*
+
+#### Identify the best classification model:
+
+```{r}
+modB_default_accuracy <- max(modB_default$resample$Accuracy)
+modB_default_accuracy
+```
+
+```{r}
+modF_glmn_default_accuracy <- max(modF_glmn_default$resample$Accuracy)
+modF_glmn_default_accuracy
+```
+
+```{r}
+gam_tune_accuracy <- max(gam_tune$resample$Accuracy)
+gam_tune_accuracy
+```
+
+The best classification model is gam_tune with 0.9397 accuracy.
+
+### Identify the most important variables associated with your best performing models: REGRESSION
+```{r}
+coef(enet_tune_10$finalModel, s = enet_tune_10$bestTune$lambda)
+```
+```{r}
+# Extract coefficients and their corresponding variable names
+coef_data <- coef(enet_tune_10$finalModel, s = enet_tune_10$bestTune$lambda)
+coef_values <- coef_data[, 1]  # Extract coefficient values
+coef_names <- rownames(coef_data)  # Extract variable names
+
+# Convert to a data frame for easier manipulation
+coef_df <- data.frame(variable = coef_names, coefficient = coef_values)
+
+# Take the absolute values of coefficients
+coef_df$abs_coefficient <- abs(coef_df$coefficient)
+
+# Sort by absolute coefficient values in descending order
+coef_df <- coef_df[order(coef_df$abs_coefficient, decreasing = TRUE), ]
+
+# Print the top variables
+head(coef_df)
+```
+
+The output you provided shows the variables (predictors) along with their coefficients and absolute coefficients. Here's what each column represents:
+
+- `variable`: This column lists the predictor variables. In your case, the predictors are represented in a non-linear spline format, such as `ns(G, df = 3)1`, which likely represents a natural spline transformation of variable G with 3 degrees of freedom.
+  
+- `coefficient`: This column lists the coefficients associated with each predictor variable. These coefficients indicate the strength and direction of the relationship between each predictor variable and the response variable. A positive coefficient indicates a positive relationship (as the predictor variable increases, the response variable tends to increase), while a negative coefficient indicates a negative relationship (as the predictor variable increases, the response variable tends to decrease).
+
+- `abs_coefficient`: This column lists the absolute values of the coefficients. It is useful for determining the importance of each predictor variable in predicting the response. Larger absolute coefficients indicate stronger associations between the predictor variable and the response variable.
+
+For example, the first row in your output indicates that the predictor variable `ns(G, df = 3)3` has a coefficient of 0.5117305. This means that for every unit increase in the transformed variable represented by `ns(G, df = 3)3`, the response variable tends to increase by approximately 0.5117305 units. The absolute coefficient value of 0.5117305 indicates that this predictor variable has a relatively strong association with the response variable.
+
+### Identify the most important variables associated with your best performing models: CLASSIFICATION
+```{r}
+coef(gam_tune$finalModel, s = gam_tune$bestTune$lambda)
+```
+
+```{r}
+# Convert the output to a data frame for easier manipulation
+coef_df <- as.data.frame(coef(gam_tune$finalModel, s = gam_tune$bestTune$lambda))
+
+# Rename the column
+names(coef_df) <- "coefficient"
+
+# Add the variable names as a separate column
+coef_df$variable <- rownames(coef_df)
+
+# Order the data frame by absolute coefficient values
+coef_df <- coef_df[order(abs(coef_df$coefficient), decreasing = TRUE), ]
+
+# Print the top important variables
+top_variables <- coef_df[1:10, ]
+print(top_variables)
+```
+
+
+This output represents the top 10 variables associated with the Generalized Additive Model (GAM), sorted by the absolute value of their coefficients.
+
+1. `s(Hue).8`: This variable represents a spline function of the Hue feature with a basis function index of 8. It has a coefficient of -21.177752, indicating a strong negative association with the response variable.
+
+2. `s(G).8`: Similar to the previous variable, this represents a spline function of the G (Green) feature with a basis function index of 8. It has a coefficient of 18.308505, indicating a strong positive association with the response variable.
+
+3. `s(Hue).2`: This variable represents a spline function of the Hue feature with a basis function index of 2. It has a coefficient of -15.090804, indicating a strong negative association with the response variable.
+
+4. `s(G).2`: Similar to the previous variable, this represents a spline function of the G (Green) feature with a basis function index of 2. It has a coefficient of -8.402266, indicating a strong negative association with the response variable.
+
+5. `s(Hue).4`: This variable represents a spline function of the Hue feature with a basis function index of 4. It has a coefficient of 7.012501, indicating a moderate positive association with the response variable.
+
+6. `s(Hue).6`: Similar to the previous variable, this represents a spline function of the Hue feature with a basis function index of 6. It has a coefficient of 6.871064, indicating a moderate positive association with the response variable.
+
+7. `s(G).4`: Similar to the previous variables, this represents a spline function of the G (Green) feature with a basis function index of 4. It has a coefficient of 6.215170, indicating a moderate positive association with the response variable.
+
+8. `s(G).6`: Similar to the previous variables, this represents a spline function of the G (Green) feature with a basis function index of 6. It has a coefficient of 5.817138, indicating a moderate positive association with the response variable.
+
+9. `Saturationgray`: This variable represents the Saturation feature when it is categorized as gray. It has a coefficient of -5.432324, indicating a strong negative association with the response variable.
+
+10. `s(G).9`: Similar to the previous variables, this represents a spline function of the G (Green) feature with a basis function index of 9. It has a coefficient of 5.204364, indicating a moderate positive association with the response variable.
+
+These coefficients provide insights into the relative importance of each variable in predicting the response variable in the GAM model.
+
+### Are the most important variables similar for the regression and classification tasks?
+Yes, Both regression and classification have G and R as important variables.
+
+• Does one of the color model INPUTS “dominate” the other variables?
+
+• Does one of the color model INPUTS appear to be not helpful at all?
+
+
+In both the regression and classification tasks, variables related to the Green (G) and Red (R) color channels appear to be important predictors. This suggests that the color components G and R play a significant role in determining both the response variable in regression and the class labels in classification. 
+
+However, it's worth noting that in the context of these tasks, the Green (G) color component seems to have a greater impact or dominance compared to the Red (R) component. This observation is supported by the analysis indicating that G has stronger associations with the response or class labels compared to R. 
+
+On the other hand, the Red (R) color component appears to be less influential or statistically significant, particularly in the regression task. This implies that variations in the Red channel may not contribute significantly to predicting the response variable or class labels. This observation is further supported by the plots, which show that lower values of R are associated with lower probability or response values, indicating that R may not be helpful in predicting popularity or the response variable.
+
+Overall, while both G and R are important variables, G seems to be more dominant and influential in both regression and classification tasks, while R appears to be less significant, especially in regression.
+
+#### RGB vs response key interpretations and implications can be drawn:
+Key interpretations can be drawn regarding the analysis of the RGB color model and its relationship with the response variable:
+
+
+1. **Motivation for Exploration**: The decision to analyze the RGB and HSL color models was driven by the desire to understand how different color compositions relate to the response variable. At the outset of the project, there was uncertainty about the nature of this relationship, prompting the need for exploration.
+
+2. **Objective of the Analysis**: Through visual examination of regression outcomes, the goal was to identify specific color combinations within the RGB model that are correlated with the response variable. This analysis aimed to uncover which input parameters—representing color components—positively or negatively influence the response.
+
+3. **Trends in the RGB Graph**:
+   - **Positive Relationship with B**: An evident trend is observed where an increase in the B (Blue) component results in a denser clustering of points, indicating a positive correlation with the response variable. This suggests that higher values of B contribute to higher response values.
+   - **Impact of G Values**: Within a specific range of G (Green) values, particularly between 200 and 255, there is a significant influence on the response variable, leading to higher response values. This range of G values seems to be particularly influential.
+   - **Effect of R Values**: Further analysis reveals that when G falls within the range of 200 to 255 and B ranges from 101 to 255, R values between 100 and 255 correspond to higher values of the response variable. This suggests that specific combinations of R, G, and B values contribute to higher response values.
+
+#### RGB vs outcome (popularity) Key interpretations and implications can be drawn:
+
+1. **Motivation for Analysis**: The decision to analyze the outcome (popularity) based on the RGB and HSL color models was driven by the goal of identifying color combinations that are associated with high levels of popularity. This analysis aimed to provide valuable insights for a PPG company, potentially aiding them in the creation of new colors that are more likely to be appealing to consumers.
+
+2. **Identification of Color Combinations**: By studying the combinations of red (R), green (G), and blue (B) values associated with higher popularity probabilities, specific color ranges were identified. These color ranges are likely to resonate well with consumers and could serve as a basis for the development of new colors.
+
+3. **Characteristics of Popular Colors**:
+   - **Range of RGB Values**: Colors with higher probabilities of popularity are characterized by specific ranges of RGB values. For example:
+     - R: 0 to 100, G: 0 to 100, B: 101 to 255 (#000065 to #6464ff) represent shades of very dark blue to light blue, indicating that these shades are associated with higher popularity.
+     - R: 0 to 150, G: 0 to 100, B: 151 to 200 (#009600 to #9664c8) and R: 101 to 150, G:101 to 150, B: 0 to 50 (#656500 to #969632) represent other ranges of colors that are likely to be popular.
+
+4. **Practical Implications for PPG**: This analysis provides actionable insights for the PPG company, suggesting specific color ranges that they can explore for the development of new colors. By synthesizing colors within these identified ranges, PPG can potentially create products that align more closely with consumer preferences and enhance their market appeal.
+
+
+#### Based on your modeling results, do you feel the color model INPUTS alone help identify POPULAR paints????
+Overall, the analysis offers valuable guidance for PPG in their color development efforts, leveraging insights from the RGB color model to inform their decision-making process and enhance their product offerings.
+
+Based on the modeling results, it appears that while the color model inputs (R, G, B, H, L, S values) provide valuable insights into predicting the popularity of paints, they do not act alone in identifying popular paints. Instead, a complex interaction exists among the wide range of color values, indicating that not all factors are entirely dominant in determining popularity.
+
+The analysis suggests that certain ranges and shades of colors are more likely to be associated with popularity, as evidenced by the predictive models. However, it is important to recognize that these color model inputs do not work independently; rather, they interact in intricate ways that influence the perceived popularity of paints.
+
+Therefore, while the color model inputs serve as crucial predictors in understanding popularity trends, their effectiveness in isolation may be limited. It is the combination and interaction of these color values that ultimately contribute to the prediction of popular paints.
+
+
+### Part iv: Interpretation – ivB) Input insights
+#### 1. Regression
+```{r}
+library(caret)
+library(splines)
+
+# Specify the resampling scheme with savePredictions = 'final'
+my_ctrl <- trainControl(method = "repeatedcv", 
+                        number = 5, 
+                        savePredictions = 'final')
+
+# Selecting a primary performance metric to use to compare the models
+my_metric <- 'RMSE'
+
+# Train the model with the updated trainControl specifications
+set.seed(1234)
+enet_default_mod10B <- train(y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness,
+                            data = train_dataset,
+                            method = 'glmnet',
+                            metric = my_metric,
+                            preProcess = c("center", "scale"),
+                            trControl = my_ctrl)
+
+enet_default_mod10B
+```
+After training the model with the updated trainControl() specifications that include savePredictions = 'final', you can predict on the held-out data to base your conclusions on how well the model performs on unseen data.
+#### predictions:
+```{r}
+# Access the predictions made on the hold-out sets during cross-validation
+predictions <- enet_default_mod10B$pred$pred
+
+# Extract the relevant columns from the original dataset
+original_data <- train_dataset[, c("R", "G", "B", "Hue", "Saturation", "Lightness")]
+
+# Bind the predictions with the original dataset
+combined_data <- cbind(original_data, predictions)
+
+# View the combined dataset
+head(combined_data)
+```
+
+### Visualize the prediction of heldout data with RBG:
+
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+combined_data$B_range <- cut(combined_data$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+combined_data %>% 
+  ggplot(mapping = aes(x = G, y = predictions)) +
+  geom_point(mapping = aes(color = R),
+            size = 1.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  geom_density_2d() +
+  theme_bw()
+
+```
+
+### Visualize the prediction of heldout data with HSL:
+```{r}
+combined_data %>% 
+  ggplot(mapping = aes(x = Hue, y = predictions)) +
+  geom_point(mapping = aes(color = Lightness), size = 1.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  geom_density_2d() + 
+  theme_bw()
+```
+
+#### 2. Classification:
+
+Defining this model again because previous I did not use saveprediction in trainControl()
+```{r}
+library(caret)
+df4_caret <- train_dataset %>% 
+  mutate(outcome = ifelse(outcome == 1, 'popular', 'unpopular')) %>% 
+  mutate(outcome = factor(outcome, levels = c("popular", "unpopular"))) %>% 
+  select(R, G, B, Hue, Saturation, Lightness, outcome)
+
+df4_caret %>% glimpse()
+```
+
+```{r}
+my_ctrl <- trainControl(method = "repeatedcv", 
+                        number = 10,
+                        repeats = 3,
+                        savePredictions = 'final')
+
+my_metric_p3 <- "Accuracy"
+```
+#### Generalized Additive Models (GAM) with caret:
+```{r}
+# Set seed for reproducibility
+set.seed(1234)
+
+gam_modelB <- train(
+  outcome ~ .,
+  data = df4_caret,
+  method = "gam",
+  metric = "Accuracy",
+  trControl = my_ctrl,
+  tuneGrid = expand.grid(
+    select = c(0.1, 0.2, 0.3),  # Specify the smoothing parameter values to tune
+    method = "GCV.Cp"            # Specify the method for tuning the smoothing parameter
+  )
+)
+```
+
+```{r}
+gam_modelB$pred
+```
+#### predictions for classification:
+```{r}
+# Access the predictions made on the hold-out sets during cross-validation
+predictions <- gam_modelB$pred$pred
+
+# Extract the relevant columns from the original dataset
+original_data <- train_dataset[, c("R", "G", "B", "Hue", "Saturation", "Lightness")]
+
+# Bind the predictions with the original dataset
+combined_data_classification <- cbind(original_data, predictions)
+
+# View the combined dataset
+head(combined_data_classification)
+```
+
+### Visualize the prediction of heldout data with RGB:
+
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+combined_data_classification$B_range <- cut(combined_data_classification$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+
+combined_data_classification %>% 
+  ggplot(mapping = aes(x = G, y = predictions)) +
+  geom_point(mapping = aes(color = R), size = 2.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  theme_bw()
+```
+```{r}
+combined_data_classification %>% 
+  ggplot(mapping = aes(x = Hue, y = predictions)) +
+  geom_point(mapping = aes(color = Lightness), size = 2.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  theme_bw()
+```
+
+From the above plots for regression and classification, identify the combinations of Lightness and Saturation, That appear to be the HARDEST to predict in the regression and classification tasks
+1. That appear to be the HARDEST to predict in the regression and classification tasks
+Saturation: Gray
+Lightness: dark
+
+2. That appear to be the EASIEST to predict in the regression and classification tasks
+Saturation: bright, muted, shaded, pure, neutral
+Lightness: Soft, saturated and pale.
+
+
+

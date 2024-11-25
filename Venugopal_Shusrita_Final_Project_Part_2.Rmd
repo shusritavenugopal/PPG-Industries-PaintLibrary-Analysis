@@ -1,0 +1,2070 @@
+---
+title: "INFSCI 2595 Spring 2024 Final Project Part 2"
+author: "ShusritaVenugopal"
+date: "2024-04-17"
+output: html_document
+---
+# Part 2: Regression
+
+## Load packages
+The tidyverse is loaded in the code chunk below. The visualization package, ggplot2, and the data manipulation package, dplyr, are part of the “larger” tidyverse.
+```{r setup, include=FALSE}
+library(tidyverse)
+```
+
+The modelr package is loaded in the code chunk below. From modelr we could use functions to calculate performance metrics for your models.
+```{r, solution1}
+library(modelr)
+```
+
+### Reload model
+Let’s now load in that model, but assign it to a different variable name. We can read in an `.rds` file with the `readr::read_rds()` function.
+```{r, reload_mod01}
+train_dataset <- readr::read_rds("my_train_data.rds")
+train_dataset |> glimpse()
+```
+```{r, reload_mod02}
+df <- readr::read_rds("df.rds")
+```
+
+## iiA) Linear models
+
+### Using lm() to fit the following linear models:
+1. Intercept-only model – no INPUTS!
+2. Categorical variables only – linear additive
+3. Continuous variables only – linear additive
+4. All categorical and continuous variables – linear additive
+5. Interaction of the categorical inputs with all continuous inputs main effects
+6. Add categorical inputs to all main effect and all pairwise interactions of continuous inputs
+7. Interaction of the categorical inputs with all main effect and all pairwise interactions of continuous inputs
+8. Try non-linear basis functions based on your EDA.
+9. Can consider interactions of basis functions with other basis functions!
+10. Can consider interactions of basis functions with the categorical inputs!
+
+```{r}
+# Model 1: Intercept-only model
+mod1 <- lm(y ~ 1, data = train_dataset)
+
+# Model 2: Categorical variables only – linear additive
+mod2 <- lm(y ~ Lightness + Saturation, data = train_dataset)
+
+# Model 3: Continuous variables only - linear additive
+mod3 <- lm(y ~ R + G + B + Hue, data = train_dataset)
+
+# Model 4: All categorical and continuous variables - linear additive
+mod4 <- lm(y ~ Lightness + Saturation + R + G + B + Hue, data = train_dataset)
+
+# Model 5: Interaction of categorical inputs with all continuous inputs main effects
+mod5 <- lm(y ~ Lightness * R + Lightness * G + Lightness * B + Lightness * Hue + 
+            Saturation * R + Saturation * G + Saturation * B + Saturation * Hue, data = train_dataset)
+
+# Model 6: Add categorical inputs to all main effect and all pairwise interactions of continuous inputs
+mod6 <- lm(y ~ (R + G + B + Hue)^2 + Lightness + Saturation, data = train_dataset)
+
+# Model 7: Interaction of the categorical inputs with all main effect and all pairwise interactions of continuous inputs
+mod7 <- lm(y ~ (Lightness + Saturation) * (R + G + B + Hue)^2, data = train_dataset)
+
+library(splines)
+# Model 8: Model with basis functions of your choice
+mod8 <- lm(y ~ ns(Hue, df = 3), data = train_dataset)
+
+# Model 9: Model with non-linear basis functions based on EDA
+# Using natural cubic splines for continuous variables
+mod9 <- lm(y ~ ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3) + ns(Hue, df = 3), data = train_dataset)
+
+# Model 10: Model considering interactions of basis functions with other basis functions and categorical inputs
+# Interaction of spline basis functions with LightnessNum
+mod10 <- lm(y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness, data = train_dataset)
+```
+
+**Now that we have fit multiple models of varying complexity, it is time to identify the best performing model. I will be identifying the best model considering training set only performance metrics. I want to consider R-squared, AIC and BIC to find the best models.**
+
+R-squared, or the coefficient of determination, is a statistical measure that shows how well the data fit a regression model.R-squared ranges from 0 to 1, with 0 indicating that the model does not explain any variability, and 1 indicating that it explains all the variability. 
+
+The Akaike Information Criterion (AIC) and Bayesian Information Criterion (BIC) are two criteria used to select regression models. They are both penalized-likelihood information criteria and are used to estimate the likelihood of a model to predict future values.
+
+I've created a function called `extract_metrics()` that encapsulates the `broom::glance()` function. This allows me to incorporate the model name along with the performance metrics.
+```{r}
+extract_metrics <- function(mod, mod_name)
+{
+  broom::glance(mod) %>% mutate(mod_name = mod_name)
+}
+```
+
+The `extract_metrics()` function is systematically applied to each `lm()` model object, and the outcomes are aggregated into a dataframe using `purrr::map_dfr()`.
+
+```{r}
+all_metrics <- purrr::map2_dfr(list(mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10),
+                               as.character(1:10),
+                               extract_metrics)
+```
+
+A glimpse of the all_metrics object is shown below. Each row is a model and the columns correspond to various performance metrics associated with the training set performance.
+
+```{r}
+all_metrics %>% glimpse()
+```
+```{r}
+# top 3 models according to r squared.
+top_3_models <- all_metrics %>%
+  arrange(desc(r.squared)) %>%
+  head(3)
+print (top_3_models)
+```
+```{r}
+# Filter the data to select the top 3 models with the least AIC values
+top_3_least_AIC <- all_metrics %>%
+  arrange(AIC) %>%
+  head(3)
+
+# View the top 3 models with least AIC values
+top_3_least_AIC
+```
+```{r}
+top_3_least_BIC <- all_metrics %>%
+  arrange(BIC) %>%
+  head(3)
+
+# View the top 3 models with least AIC values
+top_3_least_BIC
+```
+We are focusing on R-squared, AIC, and BIC. Those three metrics are visualized in a single graphic in the figure below.The x-axis is the model name displayed as an integer. The facet corresponds to the metric with AIC on the left, BIC in the middle, and R-squared displayed in the right facet.
+```{r}
+all_metrics %>% 
+  select(mod_name, df, r.squared, AIC, BIC) %>% 
+  pivot_longer(!c("mod_name", "df")) %>% 
+  ggplot(mapping = aes(x = mod_name, y = value)) +
+  geom_point(size = 1) +
+  facet_wrap(~name, scales = "free_y") +
+  theme_bw()
+```
+
+
+1. The top three models based on \( R^2 \) are 7, 10, and 5. 
+2. The top three models according to AIC are 7, 10, and 5, 
+3. The top three models according to BIC are 10, 9, and 5.
+
+Despite model 7 having the highest training set \( R^2 \), indicating better performance on the training data, BIC penalize models based on the number of parameters they estimate. Lower AIC and BIC values are preferred, as they indicate better model fit with fewer parameters.
+
+Although model 7 appears to perform the best on the training set, the penalty term in BIC suggests that the added flexibility introduced by this model may not be worth it. Model 5 consistently ranks 3rd highest according to both AIC and BIC, implying that its balance between model complexity and fit to the data is optimal. Therefore, despite model 10 having lower performance based on \( R^2 \), its simpler structure may lead to better generalization to new data compared to model 7, which is prone to overfitting due to its greater complexity.
+#### Saving the model
+```{r}
+mod10 %>% readr::write_rds("mod10.rds")
+```
+
+### Visualize the coefficient summaries for your top 3 models 
+
+Visualize the coefficient summaries for your top 3 models according to BIC and coefficient summaries comparison between the top 3 models
+
+**The top 3 models according to BIC are 10, 9, 8.**
+
+#### The coefficient summaries are visualized in the figure below for mod5:
+
+```{r}
+# mod5 coefficient summaries
+mod5 %>% coefplot::coefplot() +
+  theme_bw() +
+  theme(legend.position = 'none')
+```
+
+
+#### Length of the coef:
+```{r}
+mod5 %>% coef() %>% length()
+```
+
+As we see below 11 features are statistically significant! None of these 11 features's 95% confidence intervals contain zero. However there are 65 features and only 11 of them are significant.
+Lightness - Pale, Lightness light, lightness soft, Saturation Nuetral, saturation gray, lightness midtone, saturation shaded, saturation subdued, saturation muted - These input values are statistically significant in this model.
+
+#### The coefficient summaries are visualized in the figure below for mod9:
+
+```{r}
+# mod9 coefficient summaries
+mod9 %>% coefplot::coefplot() +
+  theme_bw() +
+  theme(legend.position = 'none')
+```
+
+#### Length of the coef:
+```{r}
+mod9 %>% coef() %>% length()
+```
+- The model uses natural cubic splines with 3 degrees of freedom for each of the continuous variables (R, G, B, and Hue) to capture non-linear relationships between these variables and the response variable (y).
+-  The model is ranked as the second-best according to the Bayesian Information Criterion (BIC) values among the considered models.
+- The model has a total of 13 coefficients, including the intercept and the coefficients associated with each of the natural splines for R, G, B, and Hue.
+- Among the 13 coefficients, only the natural splines for Hue are not statistically significant. This implies that there is insufficient evidence to reject the null hypothesis that the coefficients for these splines are equal to zero.
+- The ten features that are statistically significant (with confidence intervals not containing zero) are the natural splines for R and G, indicating that these variables have a significant linear relationship with the response variable.
+
+**What I inferred from the coef summary is that:**
+
+1. The statistically significant coefficients for the natural splines of R and G suggest that there is a significant linear relationship between the red (R) and green (G) color components and the response variable.
+
+2. The statistically significant coefficients for the natural splines of R and G suggest that there is a significant linear relationship between the red (R) and green (G) color components and the response variable. This indicates that changes in the intensity of red and green colors may have a notable impact on the response variable, while changes in blue (B) and hue may not be as influential in this model.
+
+3. Overall, the model suggests that variations in R and G values are more closely associated with changes in the response variable compared to variations in B and hue values.
+
+#### The coefficient summaries are visualized in the figure below for mod10:
+```{r}
+# mod10 coefficient summaries
+mod10 %>% coefplot::coefplot() +
+  theme_bw() +
+  theme(legend.position = 'none')
+```
+
+#### Length of the coef:
+
+```{r}
+mod10 %>% coef() %>% length()
+```
+
+The coefficient summary plot below reveals a large number of features in the model. It does not appear that any of the features are statistically significant.
+The mod10 model has many more features than just the number of inputs in our data set. This a reminder that we can derive (calculate) as many features as we want from the inputs. The number of features of a linear model does not have to equal the number of inputs!
+
+As shown by the figure below, the mod10 model has 69 features plus the intercept. Thus, there are total of 70 coefficients that needed to be estimated. Including the quadratic polynomials and their interactions have completely changed the interpretation of significant features! The linear main-effect features are no longer statistically significant. The interaction between the inputs is also not statistically significant! 
+
+#### Which inputs seem important?
+
+Inputs with significant coefficients are considered important predictors. The inputs with significant co-efficients in model 5 and 9 are Lightness - Pale, Lightness light, lightness soft, Saturation Nuetral, saturation gray, lightness midtone, saturation shaded, saturation subdued, saturation muted, R, G, B.
+
+#### Saving the best performing models according to BIC for next parts.
+```{r}
+mod10 %>% readr::write_rds("mod10.rds")
+```
+
+## Part ii: Regression– iiB) Bayesian Linear models
+**According to BIC computed in the previous part (Part2), the best models are 10 and 9.**
+
+1. mod10 is has lowest BIC value and it is identified as the best model according to BIC.
+
+* Model 10 considers interactions between basis functions (natural splines for R, G, and B) and a categorical input variable, Lightness. This model captures the combined effect of the spline basis functions with the Lightness variable, allowing for a more nuanced representation of the relationship between the predictor variables and the response.
+
+* Model 10: Model considering interactions of basis functions with other basis functions and categorical inputs.
+
+* mod10 <- lm(y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness, data = train_dataset)
+
+2. mod9 - Model with non-linear basis functions based on EDA
+
+* Model 9 utilizes natural cubic splines for the continuous variables R, G, B, and Hue. Natural cubic splines are a type of non-linear basis function used to capture complex relationships between the predictor variables and the response variable. By specifying the degrees of freedom (df = 3), the flexibility of the spline functions is controlled, allowing them to adapt to the underlying data patterns without overfitting.
+
+* Using natural cubic splines for continuous variables
+
+* mod9 <- lm(y ~ ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3) + ns(Hue, df = 3), data = train_dataset)
+
+These models are selected as the top-performing models according to the Bayesian Information Criterion (BIC) because they strike a balance between model complexity and goodness of fit. BIC penalizes models based on the number of parameters they estimate, favoring simpler models that achieve a good fit to the data. Models 9 and 10 likely achieve this balance by capturing the non-linear relationships and interactions in the data while avoiding excessive complexity that could lead to overfitting.
+
+#### The next step is to explore Bayesian models.
+
+I will perform the Bayesian analysis using the Laplace Approximation. I will fit the Bayesian linear model with the Laplace Approximation by programming the log-posterior function. I would like to understand how model behaves with weak prior and strong prior. 
+
+Before proceeding, we'll need to compile a list of essential details. This compilation should encompass the observed response, the design matrix, and the prior specification. In this setup, Gaussian priors, independent for each regression parameter, with a common mean and standard deviation, will be applied. Additionally, an Exponential prior will be utilized for the unknown likelihood noise (the σ parameter). Once this information is gathered, you can proceed to define the log-posterior function, mirroring the approach taken in previous assignments.
+
+#### Create the design matrix 
+
+Creating design matrix following mod09’s formula, and assign the object to the X09 variable. Complete the info_09_weak list by assigning the response to yobs and the design matrix to design_matrix. The shared prior mean, mu_beta, will be 0, the shared prior standard deviation, tau_beta, 50, and the rate parameter on the noise, sigma_rate, to be 1.
+```{r}
+# Create design matrix following mod09’s formula
+X09 <- model.matrix(y ~ ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3) + ns(Hue, df = 3), data = train_dataset)
+
+# Complete the info_09_weak list
+info_09_weak <- list(
+  yobs = train_dataset$y,
+  design_matrix = X09,
+  mu_beta = 0,
+  tau_beta = 50,
+  sigma_rate = 1
+)
+```
+
+The second code chunk will create the design matrix associated with mod10’s formula and assign the object to the X10 variable. Assign X10 to the design_matrix field of the info_10_weak list.
+
+```{r}
+# Create design matrix following mod09’s formula
+X10 <- model.matrix(y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness, data = train_dataset)
+
+# Complete the info_10_weak list
+info_10_weak <- list(
+  yobs = train_dataset$y,
+  design_matrix = X10,
+  mu_beta = 0,
+  tau_beta = 50,
+  sigma_rate = 1
+)
+```
+
+### Define the log-posterior function lm_logpost(). 
+You will use the log-transformation on σ, and define the log-posterior in terms of the mean trend β-parameters and the unbounded noise parameter, φ=log[σ].
+
+The unknown parameters to learn are contained within the first input argument, unknowns. The assumption is that the unknown β-parameters are listed before the unknown φ parameter in the unknowns vector. You must specify the number of β parameters programmatically to allow scaling up your function to an arbitrary number of unknowns. You will assume that all variables contained in the my_info list (the second argument to lm_logpost()) are the same fields in the info_09_weak list.
+
+```{r}
+lm_logpost <- function(unknowns, my_info)
+{
+  # specify the number of unknown beta parameters
+  length_beta <- ncol(my_info$design_matrix)
+  
+  # extract the beta parameters from the `unknowns` vector
+  beta_v <- unknowns[1:length_beta]
+  
+  # extract the unbounded noise parameter, varphi
+  lik_varphi <- unknowns[length_beta + 1]
+  
+  # back-transform from varphi to sigma
+  lik_sigma <- exp(lik_varphi)
+  
+  # extract design matrix
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  mu <- as.vector( X %*% as.matrix(beta_v) )
+  
+  # evaluate the log-likelihood
+  log_lik <- sum(dnorm(x = my_info$yobs,
+                       mean = mu,
+                       sd = lik_sigma,
+                       log = TRUE))
+  
+  # evaluate the log-prior
+  log_prior_beta <- sum(dnorm(x = beta_v,
+                              mean = my_info$mu_beta,
+                              sd = my_info$tau_beta,
+                              log = TRUE))
+  
+  log_prior_sigma <- dexp(x = lik_sigma,
+                          rate = my_info$sigma_rate,
+                          log = TRUE)
+  
+  # add the mean trend prior and noise prior together
+  log_prior <- log_prior_beta + log_prior_sigma
+  
+  # account for the transformation
+  log_derive_adjust <- lik_varphi
+  
+  # sum together
+  log_lik + log_prior + log_derive_adjust
+}
+```
+
+#### The my_laplace() function is defined.
+
+This function executes the laplace approximation and returns the object consisting of the posterior mode, posterior covariance matrix, and the log-evidence.
+```{r}
+my_laplace <- function(start_guess, logpost_func, ...)
+{
+  # code adapted from the `LearnBayes`` function `laplace()`
+  fit <- optim(start_guess,
+               logpost_func,
+               gr = NULL,
+               ...,
+               method = "BFGS",
+               hessian = TRUE,
+               control = list(fnscale = -1, maxit = 1001))
+  
+  mode <- fit$par
+  post_var_matrix <- -solve(fit$hessian)
+  p <- length(mode)
+  int <- p/2 * log(2 * pi) + 0.5 * log(det(post_var_matrix)) + logpost_func(mode, ...)
+  # package all of the results into a list
+  list(mode = mode,
+       var_matrix = post_var_matrix,
+       log_evidence = int,
+       converge = ifelse(fit$convergence == 0,
+                         "YES", 
+                         "NO"),
+       iter_counts = as.numeric(fit$counts[1]))
+}
+```
+
+#### Execute the Laplace Approximation for the model 10 formulation and the model 9 formulation. 
+
+The model 10 result to the laplace_10_weak object, and assign the model 9 result to the laplace_09_weak object
+
+```{r}
+laplace_10_weak <- my_laplace(rep(0, ncol(X10)+1), lm_logpost, info_10_weak)
+
+laplace_09_weak <- my_laplace(rep(0, ncol(X09)+1), lm_logpost, info_09_weak)
+```
+#### Check that the optimization scheme converged or not:
+As shown below, the optimization schemes for both models converged.
+```{r}
+laplace_10_weak$converge
+```
+```{r}
+laplace_09_weak$converge
+```
+#### Define a function to create a coefficient summary plot in the style of the coefplot() function, but uses the Bayesian results from the Laplace Approximation.
+
+The first argument is the vector of posterior means, and the second argument is the vector of posterior standard deviations. The third argument is the name of the feature associated with each coefficient.
+
+```{r}
+viz_post_coefs <- function(post_means, post_sds, xnames)
+{
+  tibble::tibble(
+    mu = post_means,
+    sd = post_sds,
+    x = xnames
+  ) %>% 
+    mutate(x = factor(x, levels = xnames)) %>% 
+    ggplot(mapping = aes(x = x)) +
+    geom_hline(yintercept = 0, color = 'grey', linetype = 'dashed') +
+    geom_point(mapping = aes(y = mu)) +
+    geom_linerange(mapping = aes(ymin = mu - 2 * sd,
+                                 ymax = mu + 2 * sd,
+                                 group = x)) +
+    labs(x = 'feature', y = 'coefficient value') +
+    coord_flip() +
+    theme_bw()
+}
+```
+
+#### Create the posterior summary visualization figure for model 10 and model 09.
+
+- The function needs the posterior means and standard deviations of the regression coefficients (the β parameters).
+
+- The coefficient posterior summaries for mod10 are visualized below. Notice that the number of columns in the X10 design matrix are used to identify the number of regression coefficients (beta parameters).
+
+```{r}
+viz_post_coefs(laplace_10_weak$mode[1:ncol(X10)],
+               sqrt(diag(laplace_10_weak$var_matrix)[1:ncol(X10)]),
+               colnames(X10))
+```
+
+Likewise, the posterior coefficient summaries for mod09 are shown below. Again the number of columns in the design matrix is used to identify the regression coefficients.
+
+```{r}
+viz_post_coefs(laplace_09_weak$mode[1:ncol(X09)],
+               sqrt(diag(laplace_09_weak$var_matrix)[1:ncol(X09)]),
+               colnames(X09))
+```
+
+#### Using the Bayes Factor to identify the better of the models with weak prior.
+The Bayes Factor is calculated using log-arithmetic.
+```{r}
+exp( laplace_09_weak$log_evidence - laplace_10_weak$log_evidence )
+```
+
+ - The output value indicates a very strong preference for Model 09 over Model 10 based on the Bayes Factor calculated using log-arithmetic. This exceedingly small value suggests overwhelming evidence in favor of Model 09 compared to Model 10. In other words, given the data and the specified weak prior assumptions, Model 09 is strongly favored over Model 10.
+ 
+Conclusion: The best performing model with weak prior is Model 09.
+
+#### Fit the Bayesian models assuming more informative or strong prior
+
+Trying a more informative or strong prior by reducing the prior standard deviation on the regression coefficients from 50 to 1. The prior mean will still be zero.
+
+The below code block defines the list of required information for both the model 10 and model 9 formulations using the strong prior on the regression coefficients. All other information, data and the σ prior, are the same as weak prior.
+
+Define the lists of required information for the strong prior.
+```{r}
+info_10_strong <- list(
+  yobs = df$y,
+  design_matrix = X10,
+  mu_beta = 0,
+  tau_beta = 1,
+  sigma_rate = 1
+)
+
+info_09_strong <- list(
+  yobs = df$y,
+  design_matrix = X09,
+  mu_beta = 0,
+  tau_beta = 1,
+  sigma_rate = 1
+)
+
+```
+
+Execute the Laplace Approximation.
+
+```{r}
+laplace_10_strong <- my_laplace(rep(0, ncol(X10)+1), lm_logpost, info_10_strong)
+
+laplace_09_strong <- my_laplace(rep(0, ncol(X09)+1), lm_logpost, info_09_strong)
+```
+
+As shown below, the optimizations did converge for both models.
+```{r}
+purrr::map_chr(list(laplace_10_strong, laplace_09_strong), "converge")
+```
+### Visualize the regression coefficient posterior summary statistics.
+
+#### Use the viz_post_coefs() function to visualize the posterior coefficient summaries for model 3 and model 6, based on the strong prior specification.
+
+**Model 10:**
+```{r}
+viz_post_coefs(laplace_10_strong$mode[1:ncol(X10)],
+               sqrt(diag(laplace_10_strong$var_matrix)[1:ncol(X10)]),
+               colnames(X10))
+```
+I think that coefficient posteriors are still very uncertain for mod10. However, it is important to note the x-axis scale in the figure. The figure below has all coefficient posterior means between -3 and +4. The posterior coefficient summaries for mod10 associated with the weak prior covered a much wider range (-50 to 50). Many of the coefficients had posterior means in the double digits when we used the weak prior. The more restrictive “strong” prior with prior standard deviation of 1 is thus preventing the coefficients from reaching the values supported by the data alone for mod10.
+
+**Model 9:**
+```{r}
+viz_post_coefs(laplace_09_strong$mode[1:ncol(X09)],
+               sqrt(diag(laplace_09_strong$var_matrix)[1:ncol(X09)]),
+               colnames(X09))
+```
+
+
+The posterior coefficient summaries for mod03 appear to be basically the same as what we saw with the weak prior. Our stronger prior therefore is restricting the coefficients to the range the data (likelihood) was supporting anyway. Thus, the posterior for this particular model and data is not influenced by this specific prior.
+
+### Using the Bayes Factor to identify the better of the models with strong prior.
+The Bayes Factor is calculated using log-arithmetic.
+```{r}
+exp( laplace_09_strong$log_evidence - laplace_10_strong$log_evidence )
+```
+
+The Bayes Factor reveals that mod09 is the better of the two models. The Bayes Factor is still so large, we should not consider mod10 an appropriate model compared to mod09.
+
+**According to Bayes factor for weak and strong prior, model 9 is more favoured than model 10.**
+
+As a performance metrics I would also like to consider AIC and BIC values. They are computed below:
+
+```{r}
+extract_metrics <- function(mod, mod_name)
+{
+  broom::glance(mod) %>% mutate(mod_name = mod_name)
+}
+
+all_bayes_metrics <- purrr::map2_dfr(list(mod9, mod10),
+                               as.character(9:10),
+                               extract_metrics)
+
+all_bayes_metrics %>% glimpse()
+```
+**According to both AIC and BIC: Mod10 is best performing model.** 
+
+BIC penalizes model complexity more heavily than AIC, leading to a preference for simpler models. It's a frequentist criterion based on the likelihood function. Simpler models might generalize better for prediction, while more complex models might offer deeper insights into the underlying data generation process.
+
+#### Saving the 2 best performing models according to BIC for next parts.
+```{r}
+laplace_09_strong %>% readr::write_rds("laplace_09_strong.rds")
+laplace_10_strong %>% readr::write_rds("laplace_10_strong.rds")
+```
+
+#### Visualize the regression coefficient posterior summary statistics for your best model.
+
+The coefficient posterior summaries based on the strong prior and weak prior for mod10 are visualized below.
+At first glance, we may think that coefficient posteriors are still very uncertain for mod10. However, it is important to note the x-axis scale in the figure. The figure below has all coefficient posterior means between -2 and +4. The posterior coefficient summaries for mod10 associated with the weak prior covered a much wider range. Many of the coefficients had posterior means in the double digits when we used the weak prior. The more restrictive “strong” prior with prior standard deviation of 1 is thus preventing the coefficients from reaching the values supported by the data alone for mod10
+
+```{r}
+viz_post_coefs(laplace_10_strong$mode[1:ncol(X10)],
+               sqrt(diag(laplace_10_strong$var_matrix)[1:ncol(X10)]),
+               colnames(X10))
+```
+
+
+```{r}
+viz_post_coefs(laplace_10_weak$mode[1:ncol(X10)],
+               sqrt(diag(laplace_10_weak$var_matrix)[1:ncol(X10)]),
+               colnames(X10))
+```
+
+#### How does the lm() maximum likelihood estimate (MLE) on 𝜎 relate to the posterior UNCERTAINTY on 𝜎?
+
+The maximum likelihood estimate (MLE) of 𝜎 obtained from the lm() function represents a point estimate of the standard deviation parameter based on the observed data. It is derived by maximizing the likelihood function, which measures the probability of observing the data given a particular value of 𝜎.
+
+In contrast, the posterior uncertainty on 𝜎, as obtained from Bayesian inference, reflects the distribution of possible values of 𝜎 given both the observed data and the prior information. This uncertainty is captured by the posterior distribution, which accounts for the entire range of plausible values of 𝜎 along with their respective probabilities.
+
+The relationship between the MLE and the posterior uncertainty on 𝜎 depends on the specific prior chosen for the Bayesian analysis. A more informative prior, such as a strong prior with a smaller standard deviation, can constrain the posterior distribution, leading to reduced uncertainty compared to the MLE. Conversely, a less informative prior, such as a weak prior with a larger standard deviation, may result in a broader posterior distribution with greater uncertainty.
+
+#### Study the posterior coefficient uncertainty. 
+
+Let’s keep things simple as we did in assignments with an assumed value of σ=1.you can also think of this as examining the scaled uncertainty. You will begin by assuming that the prior does not matter and thus are assuming an infinitely diffuse prior or a prior with infinite uncertainty.
+You will begin by assuming that the prior does not matter and thus are assuming an infinitely diffuse prior or a prior with infinite uncertainty.
+
+```{r}
+# Assuming σ = 1
+sigma_squared = 1
+
+# Compute the posterior covariance matrix for mod10
+post_cov_matrix_mod10 = sigma_squared * solve(t(X10) %*% X10)
+print("Number of rows and columns in mod10")
+print(post_cov_matrix_mod10 %>% dim())
+```
+
+Do you feel the posterior is precise or are we quite uncertain about 𝜎?
+
+- The coefficient posterior summaries for mod10 associated with the weak prior covered a much wider range, with many coefficients having posterior means in the double digits. This indicates significant uncertainty in the estimates of the coefficients.
+
+- The use of a strong prior with a prior standard deviation of 1 is restricting the coefficients from reaching the values supported by the data alone, indicating uncertainty in the posterior estimates.
+
+- In Bayesian analysis, uncertainty is inherent in the posterior distribution, which captures the range of possible values of 𝜎 along with their respective probabilities. The presence of wide posterior distributions suggests uncertainty in estimating 𝜎.
+
+## Part ii: Regression – iiC) Linear models Predictions
+
+It is now time to examine the predictive trends of the models to better interpret their behavior. I will visualize the trends on a specifically designed prediction grid. The code chunk below defines that grid for you using the expand.grid() function.
+ 
+```{r}
+# Define unique values for Lightness and Saturation
+lightness_values <- c("dark", "deep", "light", "midtone", "pale", "saturated", "soft")
+saturation_values <- c("bright", "gray", "muted", "neutral", "pure", "subdued", "shaded")
+
+# Generate the grid
+viz_grid <- expand.grid(
+  R = sample(0:255, 2),  # Adjust the number of values sampled as needed
+  G = sample(0:255, 2),  # Adjust the number of values sampled as needed
+  B = sample(0:255, 2),  # Adjust the number of values sampled as needed
+  Lightness = lightness_values,
+  Saturation = saturation_values,
+  Hue = sample(0:36, 2)
+)
+
+# Generate random integers for R, G, B for each row
+viz_grid$R <- sample(0:255, nrow(viz_grid), replace = TRUE)
+viz_grid$G <- sample(0:255, nrow(viz_grid), replace = TRUE)
+viz_grid$B <- sample(0:255, nrow(viz_grid), replace = TRUE)
+viz_grid$Hue <- sample(0:36, nrow(viz_grid), replace = TRUE)
+
+# Display the structure of viz_grid
+glimpse(viz_grid)
+
+```
+#### Save this grid for next part.
+```{r}
+viz_grid %>% readr::write_rds("viz_grid.rds")
+```
+
+
+Posterior samples are generated and those samples are used to calculate the posterior samples of the mean trend and generate random posterior samples of the response around the mean. The glimpse provided above shows there are 784 combinations of the 6 inputs. You will therefore make over 700 predictions to study the trends of the event probability!
+ 
+We will now summarize the posterior predictions of the mean and of the random response.
+we will make predictions for each of the models and visualize their trends. A function, tidy_predict(), is created for you which assembles the predicted mean trend, the confidence interval, and the prediction interval into a tibble for you. The result include the input values to streamline making the visualizations.
+
+```{r}
+tidy_predict <- function(mod, xnew)
+{
+  pred_df <- predict(mod, xnew, interval = "confidence") %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    dplyr::select(pred = fit, ci_lwr = lwr, ci_upr = upr) %>% 
+    bind_cols(predict(mod, xnew, interval = 'prediction') %>% 
+                as.data.frame() %>% tibble::as_tibble() %>% 
+                dplyr::select(pred_lwr = lwr, pred_upr = upr))
+  
+  xnew %>% bind_cols(pred_df)
+}
+```
+The first argument to the tidy_predict() function is a lm() model object and the second argument is new or test dataframe of inputs. When working with lm() and its predict() method, the functions will create the test design matrix consistent with the training design basis. It does so via the model object’s formula which is contained within the lm() model object. 
+
+**Make predictions with 2 models selected from Part 1. I will be using the linear non bayesian models - mod9 and mod10 using the visualization grid, viz_grid. The predictions will be assigned to the variables pred_lm_09 and pred_lm_10** 
+
+Predictions are made by the 2 models in the code chunk below.
+```{r}
+pred_lm_02 <- tidy_predict(mod2, viz_grid)
+pred_lm_03 <- tidy_predict(mod3, viz_grid)
+pred_lm_04 <- tidy_predict(mod4, viz_grid)
+pred_lm_05 <- tidy_predict(mod5, viz_grid)
+pred_lm_06 <- tidy_predict(mod6, viz_grid)
+pred_lm_07 <- tidy_predict(mod7, viz_grid)
+pred_lm_08 <- tidy_predict(mod8, viz_grid)
+pred_lm_09 <- tidy_predict(mod9, viz_grid)
+pred_lm_10 <- tidy_predict(mod10, viz_grid)
+```
+
+A glimpse of the pred_lm_09 tibble is shown below.
+```{r}
+pred_lm_09 %>% glimpse()
+```
+
+A glimpse of the pred_lm_10 tibble is shown below.
+```{r}
+pred_lm_10 %>% glimpse()
+```
+#### Visualize the predictive trends and the confidence and prediction intervals for each model.
+
+The pred column in of each pred_lm_ objects is the predictive mean trend. The ci_lwr and ci_upr columns are the lower and upper bounds of the confidence interval, respectively. The pred_lwr and pred_upr columns are the lower and upper bounds of the prediction interval, respectively.
+
+You will use ggplot() to visualize the predictions. You will use geom_line() to visualize the mean trend and geom_ribbon() to visualize the uncertainty intervals.
+
+Visualize the predictions of each model on the visualization grid. Pipe the pred_lm_ object to ggplot() and map the  variable to the x-aesthetic.
+
+The predictions from mod1, mod2 and mod03 () are shown below. I wanted to visualize how the simpler models without complex interaction would be predicted. 
+
+```{r}
+# Assuming 'B' is the variable you want to use as a spline function in Model 9
+pred_lm_02 %>% 
+  ggplot(mapping = aes(x = G)) +
+  geom_ribbon(mapping = aes(ymin = pred_lwr, ymax = pred_upr), fill = 'orange') +
+  geom_line(mapping = aes(y = pred), color = 'black') +
+  coord_cartesian(ylim = c(-3, 3)) +  # Adjust the limits as needed
+  facet_wrap(~Saturation, scales = "free", labeller = "label_both") +  # Using 'Saturation' as the facet variable
+  theme_bw()
+
+pred_lm_03 %>% 
+  ggplot(mapping = aes(x = G)) +
+  geom_ribbon(mapping = aes(ymin = pred_lwr, ymax = pred_upr), fill = 'orange') +
+  geom_line(mapping = aes(y = pred), color = 'black') +
+  coord_cartesian(ylim = c(-3, 3)) +  # Adjust the limits as needed
+  facet_wrap(~Saturation, scales = "free", labeller = "label_both") +  # Using 'Saturation' as the facet variable
+  theme_bw()
+```
+
+## To state if the predictive trends are consistent between the 2 selected linear models.
+
+To state if the predictive trends are consistent between the 2 selected linear models, the predictions are consistent with the coefficient summaries we looked at previously. 
+
+#### Model 9:
+
+- Previously, G, B, R were statistically significant in model 9, to show this I have plotted the predictive trends and the confidence and prediction intervals for model 9 below. The model is consistent with the coefficient plot summaries.
+
+```{r}
+library(ggplot2)
+
+# Define reference values for the remaining inputs (replace these with your actual reference values)
+reference_values <- data.frame(
+  R = mean(pred_lm_09$R),
+  G = mean(pred_lm_09$G),
+  B = mean(pred_lm_09$B),
+  Lightness = mean(pred_lm_09$Lightness),
+  Hue = mean(pred_lm_09$Hue)
+)
+
+# Plot predictive trends for G and Saturation
+pred_lm_09 %>%
+  ggplot(aes(x = G)) +
+  geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr),
+              fill = 'orange') +
+  geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr),
+              fill = 'grey') +
+  geom_line(aes(y = pred),
+            color = 'black') +
+  coord_cartesian(ylim = c(min(pred_lm_09$ci_lwr), max(pred_lm_09$ci_upr))) +
+  facet_wrap(~ Saturation, scales = "free", labeller = "label_both") + 
+  theme_bw() +
+  # Add reference lines for the remaining inputs
+  geom_vline(data = reference_values, aes(xintercept = Hue), linetype = "dashed", color = "pink") +
+  geom_vline(data = reference_values, aes(xintercept = R), linetype = "dashed", color = "green") +
+  geom_vline(data = reference_values, aes(xintercept = B), linetype = "dashed", color = "blue")
+
+# Plot predictive trends for G and Lightness
+pred_lm_09 %>%
+  ggplot(aes(x = G)) +
+  geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr),
+              fill = 'orange') +
+  geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr),
+              fill = 'grey') +
+  geom_line(aes(y = pred),
+            color = 'black') +
+  coord_cartesian(ylim = c(min(pred_lm_09$ci_lwr), max(pred_lm_09$ci_upr))) +
+  facet_wrap(~ Lightness, scales = "free", labeller = "label_both") + 
+  theme_bw() +
+  geom_vline(data = reference_values, aes(xintercept = Hue), linetype = "dashed", color = "pink") +
+  geom_vline(data = reference_values, aes(xintercept = R), linetype = "dashed", color = "green") +
+  geom_vline(data = reference_values, aes(xintercept = B), linetype = "dashed", color = "blue")
+```
+- Hue did not show any statistical significance in the co-eff summaries, to show this I have plotted the predictive trends and the confidence and prediction intervals for model 9 below with Hue has primary input. The graph shows that this behaviour is still consistent for the predictive trend.
+```{r}
+# Plot predictive trends for Hue and Lightness
+pred_lm_09 %>%
+  ggplot(aes(x = Hue)) +
+  geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr),
+              fill = 'orange') +
+  geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr),
+              fill = 'grey') +
+  geom_line(aes(y = pred),
+            color = 'black') +
+  coord_cartesian(ylim = c(min(pred_lm_09$ci_lwr), max(pred_lm_09$ci_upr))) +
+  facet_wrap(~ Lightness, scales = "free", labeller = "label_both") + 
+  theme_bw() +
+  geom_vline(data = reference_values, aes(xintercept = G), linetype = "dashed", color = "pink") +
+  geom_vline(data = reference_values, aes(xintercept = R), linetype = "dashed", color = "green") +
+  geom_vline(data = reference_values, aes(xintercept = B), linetype = "dashed", color = "blue")
+
+```
+#### Model 10:
+
+We see the trend (the black line) become more and more “wiggly” and the confidence interval (grey ribbon) growing larger in size in model 10. The confidence interval is growing. Visually the pattern of both the models seem consistent with each other. Especially, the plot G vs Pred with Secondary input being Lightness, the values like deep, pale, saturated and soft are very much consisten with model 9.
+
+```{r}
+pred_lm_10 %>%
+  ggplot(aes(x = G)) +
+  geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr),
+              fill = 'orange') +
+  geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr),
+              fill = 'grey') +
+  geom_line(aes(y = pred),
+            color = 'black') +
+  coord_cartesian(ylim = c(min(pred_lm_09$ci_lwr), max(pred_lm_09$ci_upr))) +
+  facet_wrap(~ Saturation, scales = "free", labeller = "label_both") + 
+  theme_bw() +
+  # Add reference lines for the remaining inputs
+  geom_vline(data = reference_values, aes(xintercept = Hue), linetype = "dashed", color = "pink") +
+  geom_vline(data = reference_values, aes(xintercept = R), linetype = "dashed", color = "green") +
+  geom_vline(data = reference_values, aes(xintercept = B), linetype = "dashed", color = "blue")
+
+# Plot predictive trends
+pred_lm_10 %>%
+  ggplot(aes(x = G)) +
+  geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr),
+              fill = 'orange') +
+  geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr),
+              fill = 'grey') +
+  geom_line(aes(y = pred),
+            color = 'black') +
+  coord_cartesian(ylim = c(min(pred_lm_09$ci_lwr), max(pred_lm_09$ci_upr))) +
+  facet_wrap(~ Lightness, scales = "free", labeller = "label_both") + 
+  theme_bw() +
+  geom_vline(data = reference_values, aes(xintercept = Hue), linetype = "dashed", color = "pink") +
+  geom_vline(data = reference_values, aes(xintercept = R), linetype = "dashed", color = "green") +
+  geom_vline(data = reference_values, aes(xintercept = B), linetype = "dashed", color = "blue")
+```
+### Plotting Hue vs Pred with a secondary input lightness or saturation with model10
+
+Hue is not statistically significant as we have seen the co-eff plots. 
+```{r}
+pred_lm_10 %>%
+  ggplot(aes(x = Hue)) +
+  geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr),
+              fill = 'orange') +
+  geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr),
+              fill = 'grey') +
+  geom_line(aes(y = pred),
+            color = 'black') +
+  coord_cartesian(ylim = c(min(pred_lm_09$ci_lwr), max(pred_lm_09$ci_upr))) +
+  facet_wrap(~ Lightness, scales = "free", labeller = "label_both") + 
+  theme_bw() +
+  # Add reference lines for the remaining inputs
+  geom_vline(data = reference_values, aes(xintercept = G), linetype = "dashed", color = "pink") +
+  geom_vline(data = reference_values, aes(xintercept = R), linetype = "dashed", color = "green") +
+  geom_vline(data = reference_values, aes(xintercept = B), linetype = "dashed", color = "blue")
+```
+
+## Part ii: Regression – iiD) Train/tune with resampling
+Instructions: 
+1. You must train, assess, tune, and compare more complex methods via resampling.
+2. You may use either caret or tidymodels to handle the preprocessing, training, testing, and evaluation.
+
+### Using caret to manage the training, assessment, and tuning of the glmnet elastic net penalized linear regression model.
+
+The code chunk below imports the caret package 
+```{r}
+library(caret)
+```
+In the Data Exploration part of the project, the categorical values in Lightness and Saturation Columns were reformatted to have integers. So, all the input variables like R, G, B, Hue, LightnessNum and SaturationNum are reformatted to be consistent with the caret preferred structure.
+```{r}
+train_dataset %>% glimpse()
+```
+
+### Train and tune the following models:
+
+#### Linear models:
+1. All categorical and continuous inputs - linear additive features - 
+- Model 4: All categorical and continuous variables linear additive: 
+- mod4 <- lm(y ~ Lightness + Saturation + R + G + B + Hue, data = train_dataset)
+
+2. Add categorical inputs to all main effect and all pairwise interactions of continuous inputs: 
+- Model 6: Add categorical inputs to all main effect and all pairwise interactions of continuous inputs
+- mod6 <- lm(y ~ (R + G + B + Hue)^2 + Lightness + Saturation, data = train_dataset)
+
+3. The 2 models selected from iiA:
+- Model 9: Model with non-linear basis functions based on EDA
+- mod9 <- lm(y ~ ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3) + ns(Hue, df = 3), data = train_dataset)
+
+- Model 10: Model considering interactions of basis functions with other basis functions and categorical inputs
+- mod10 <- lm(y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness, data = train_dataset)
+
+#### Regularized regression with Elastic net
+1. Add categorical inputs to all main effect and all pairwise interactions of continuous inputs: 
+- Model 6: Add categorical inputs to all main effect and all pairwise interactions of continuous inputs
+- mod6 <- lm(y ~ (R + G + B + Hue)^2 + Lightness + Saturation, data = train_dataset)
+ 
+2. The more complex of the 2 models selected from iiA
+- Model 10: Model considering interactions of basis functions with other basis functions and categorical inputs
+- mod10 <- lm(y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness, data = train_dataset)
+
+##### Nueral Network, Gradient Boosted Tree Model, Randon forest, GAM, SVN.
+
+###  Specify the resampling scheme
+Specify the resampling scheme that caret will use to train, assess, and tune a model.
+
+The resampling scheme is specified by the trainControl() function in caret. The type of scheme is controlled by the method argument. For k-fold cross-validation, the method argument must equal 'cv' and the number of folds is controlled by the number argument. We could instruct caret to use repeated cross-validation by specifying method to be 'repeatedcv' and including the number of repeats via the repeates argument. However, we will follow the process consistent with lecture and use 5-fold cross-validation for this assignment.
+
+Specify the resampling scheme:
+```{r}
+my_ctrl <- trainControl(method = "repeatedcv", number = 5, savePredictions = 'final' )
+```
+I am using 5 fold cross-validation. Each model will be trainined 5 times and tested 5 times.
+
+The caret package requires that we specify a primary performance metric of interest.
+
+Selecting a primary performance metric to use to compare the models:
+We need to use a performance metric associated with linear regression. Thus, we can choose RMSE, MAE, or Rsquared. We are using 5 fold cross-validation and thus each fold’s holdout test set contains 20% of the train data. 
+```{r}
+my_metric <- 'RMSE'
+```
+
+#### Training and evaluating the models with the train() function from caret. 
+1. All categorical and continuous inputs - linear additive features - Model 4
+```{r}
+set.seed(2001)
+mod_lmc_4 <- train(y ~ Lightness + Saturation + R + G + B + Hue, 
+                        data = train_dataset,
+                        method = "lm",
+                        metric = my_metric,
+                        trControl = my_ctrl)
+
+mod_lmc_4
+```
+The default model has RMSE value of 0.0896. 
+
+2. Add categorical inputs to all main effect and all pairwise interactions of continuous inputs: Model 5
+
+```{r}
+set.seed(2001)
+mod_lmc_6 <- train(y ~ (R + G + B + Hue)^2 + Lightness + Saturation, 
+                        data = train_dataset,
+                        method = "lm",
+                        metric = my_metric,
+                        trControl = my_ctrl)
+
+mod_lmc_6
+```
+
+3. Model with non-linear basis functions based on EDA: Model 9
+
+```{r}
+set.seed(2001)
+mod_lmc_9 <- train(y ~ ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3) + ns(Hue, df = 3), 
+                        data = train_dataset,
+                        method = "lm",
+                        metric = my_metric,
+                        trControl = my_ctrl)
+
+mod_lmc_9
+```
+
+4. Model considering interactions of basis functions with other basis functions and categorical inputs: Model 10
+
+```{r}
+set.seed(2001)
+mod_lmc_10 <- train(y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness, 
+                        data = train_dataset,
+                        method = "lm",
+                        metric = my_metric,
+                        trControl = my_ctrl)
+
+mod_lmc_10
+```
+
+The traindataset_results_resampling object can be used to compare the models through tables and visualizations.
+
+```{r}
+traindataset_results_resampling = resamples(list(
+                                 fit_04 = mod_lmc_4,
+                                 fit_06 = mod_lmc_6,
+                                 fit_09 = mod_lmc_9,
+                                 fit_10 = mod_lmc_10
+                                 ))
+```
+
+The caret package provides default summary and plot methods which rank the models based on their resampling hold-out results. The summary() function prints a table like object which summarizes the resampling results. The dotplot() function creates a dot plot with confidence intervals on the resampling performance metrics.
+
+```{r}
+traindataset_results_resampling |> summary(metric = 'RMSE')
+```
+**The model "fit_10" has the lowest mean RMSE (0.06381023), making it the best model according to the 5-fold cross-validation scheme.**
+
+#### Saving the 2 best performing models according to BIC for next parts.
+```{r}
+mod_lmc_10 %>% readr::write_rds("mod_lmc_10.rds")
+```
+
+Let's us also visualize the resampling results using the dotplot() function:
+```{r}
+traindataset_results_resampling |> dotplot(metric = 'RMSE')
+```
+
+
+Now that we have trained linear models and identified the best model according to the RMSE performance metrics, we will now train Regularized regression with Elastic net.
+
+### Regularized regression with Elastic net
+
+Regularized regression techniques like Elastic Net (which combines L1 and L2 regularization) are commonly used in regression problems to prevent overfitting and improve the generalization ability of the model. When using Elastic Net, you typically tune hyperparameters like the mixing parameter (alpha) and the regularization parameter (lambda).
+
+To evaluate the performance of an Elastic Net model, I will use RMSE as the evaluation metric. RMSE measures the average deviation of predicted values from actual values, and it's a suitable metric for regression problems because it penalizes larger errors more heavily. Lower RMSE values indicate better model performance, where the predicted values are closer to the actual values.
+
+Assign the method argument to 'glmnet' and set the metric argument to my_metric. Even though the inputs were standardized for you, you must also instruct caret to standardize the features by setting the preProcess argument equal to c('center', 'scale'). Assign the trControl argument to the my_ctrl object.
+
+The caret::train() function works with the formula interface.
+
+#### Train, assess, and tune the glmnet elastic net model consistent with Model 6:
+
+```{r}
+set.seed(1234)
+
+enet_default_mod6 <- train( y ~ (R + G + B + Hue)^2 + Lightness + Saturation,
+                       data = train_dataset,
+                       method = 'glmnet',
+                       metric = my_metric,
+                       preProcess = c("center", "scale"),
+                       trControl = my_ctrl)
+
+enet_default_mod6
+```
+#### Create a custom tuning grid to further tune the elastic net lambda and alpha tuning parameters for model 6.
+
+Create a tuning grid with the expand.grid() function which has two columns named alpha and lambda. The alpha variable should be evenly spaced between 0.1 and 1.0 by increments of 0.1. The lambda variable should have 25 evenly spaced values in the log-space between the minimum and maximum lambda values from the caret default tuning grid. Assign the tuning grid to the enet_grid object.
+
+The candidate of lambda values are created in the code chunk below. The seq() function is used to create a sequence of evenly spaced values between the log of the min and log of the max values tried by the default grid. The log-space makes it easier to span several orders of magnitude more easily. The exp() function is then used to convert the values back to the lambda space.
+
+```{r}
+my_lambda_grid_06 <- exp(seq(log(min(enet_default_mod6$results$lambda)),
+                          log(max(enet_default_mod6$results$lambda)),
+                          length.out = 25))
+```
+The enet_grid_06 is defined below by combining the my_lambda_grid_06 with a grid of alpha or mixing fraction values between 0.1 and 1.0.
+
+```{r}
+enet_grid_06 <- expand.grid(alpha = seq(0.1, 1.0, by = 0.1),
+                         lambda = my_lambda_grid_06)
+
+enet_grid_06 %>% dim()
+```
+The number of combinations generated by expand.grid() can be found by checking the dimensions of enet_grid. As shown below, we will try out 250 tuning parameter combinations!
+
+Now, Train, assess, and tune the elastic net model with the custom tuning grid and assign the result to the enet_tune_06 object. 
+```{r}
+set.seed(1234)
+enet_tune_06 <- train(y ~ (R + G + B + Hue)^2 + Lightness + Saturation,
+                   data = train_dataset,
+                   method = 'glmnet',
+                   metric = my_metric,
+                   tuneGrid = enet_grid_06,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl)
+
+plot(enet_tune_06, xTrans = log)
+```
+```{r}
+enet_tune_06$bestTune
+```
+
+The optimal tuning parameter values are printed above The best alpha is 0.2. However, look closely at the resampled averaged Accuracy values displayed in the above figure. Multiple tuning parameter combinations perform roughly the same as the overall best. The overall best averaged Accuracy is only slightly better than the next best result. By default caret chooses the overall best, but perhaps “pure” Lasso are within the 1 standard error of the overall best tuning parameter values. Extracting the one-standard error rule results is tricky to do in caret and so we will follow the overall best recommendation for now.
+
+#### Print the coefficients to the screen for the tuned elastic net model.
+```{r}
+coef(enet_tune_06$finalModel, s = enet_tune_06$bestTune$lambda)
+```
+The coefficients are displayed in a sparse matrix format, where non-zero coefficients are explicitly shown, while zero coefficients are represented as '.'.
+Interpretations from the Sparse matrix:
+
+1. The coefficients for the colors R and G indicate their respective contributions to the response variable (y) in the context of the Elastic Net model. As interpreted before, G contributes more than R and B towards the logit transformed response 'y'. These coefficients indicate that both Red (R) and Green (G) colors have a positive impact on the predicted value of the response variable in the Elastic Net model. 
+
+2. The Blue color variable did not have a significant impact on the response variable (y) in the context of the Elastic Net model.
+
+3. The negative coefficient of -0.016944750 for the variable "Hue" indicates its contribution to the predicted value of the response variable in the Elastic Net model.The negative coefficient suggests that higher values of "Hue" are associated with lower predicted values of the response variable. The hue becomes more pronounced or shifts towards certain colors (depending on how "Hue" is represented), it tends to lead to lower predicted values for the response variable.
+
+4. Lightnessdeep, Lightnesspale, Lightnesssaturated, Saturationpure indicate a positive impact on their respective contributions to the response variable (y) in the context of the Elastic Net model.
+
+As a comparison, let’s see how many features are turned off by the default tuning grid result since it identified “pure” Lasso as the best. The default and tuned results are very much consistent. 
+
+### Train, assess, and tune the glmnet elastic net model consistent with Model 10 (complex one between the two from part 2A):
+```{r}
+set.seed(1234)
+
+enet_default_mod10 <- train( y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness,
+                       data = train_dataset,
+                       method = 'glmnet',
+                       metric = my_metric,
+                       preProcess = c("center", "scale"),
+                       trControl = my_ctrl)
+
+enet_default_mod10
+```
+
+#### Create a custom tuning grid to further tune the elastic net lambda and alpha tuning parameters for model 6.
+```{r}
+my_lambda_grid_10 <- exp(seq(log(min(enet_default_mod10$results$lambda)),
+                          log(max(enet_default_mod10$results$lambda)),
+                          length.out = 25))
+```
+```{r}
+enet_grid_10 <- expand.grid(alpha = seq(0.1, 1.0, by = 0.1),
+                         lambda = my_lambda_grid_10)
+
+enet_grid_10 %>% dim()
+```
+
+Now, Train, assess, and tune the elastic net model with the custom tuning grid and assign the result to the enet_tune_10 object. 
+```{r}
+set.seed(1234)
+enet_tune_10 <- train(y ~ (ns(R, df = 3) + ns(G, df = 3) + ns(B, df = 3)) * Lightness,
+                   data = train_dataset,
+                   method = 'glmnet',
+                   metric = my_metric,
+                   tuneGrid = enet_grid_10,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl)
+
+plot(enet_tune_10, xTrans = log)
+```
+
+```{r}
+enet_tune_10$bestTune
+```
+The optimal tuning parameter values are printed above The best alpha is 0.1.
+
+Interpretation:
+From the sparse matrix, we can observe the coefficients for various predictor variables and their interactions with the response variable. 
+
+```{r}
+mod10 %>% readr::write_rds("enet_tune_10.rds")
+```
+
+**Positively Influencing Features:**
+
+1. **ns(R, df = 3)**:
+   - The basis functions for the variable R (Red) with degree of freedom 3 have positive coefficients, indicating that higher values of the Red color variable positively influence the response.
+
+2. **ns(G, df = 3)**:
+   - Similar to R, the basis functions for the variable G (Green) with degree of freedom 3 have positive coefficients, suggesting that higher values of the Green color variable positively influence the response.
+
+3. **Interaction Terms**:
+   - Some interaction terms involving R and G with Lightness categories have positive coefficients, indicating that certain combinations of these variables have a positive influence on the response.
+
+4. **Lightness Categories**:
+   - Some categories of the Lightness variable have positive coefficients, suggesting that certain levels of lightness contribute positively to the response.
+
+**Negatively Influencing Features:**
+
+1. **ns(R, df = 3)**:
+   - Some interaction terms involving R and Lightness categories have negative coefficients, indicating that certain combinations of these variables have a negative influence on the response.
+
+2. **ns(G, df = 3)**:
+   - Similar to R, some interaction terms involving G and Lightness categories have negative coefficients, suggesting that certain combinations of these variables have a negative influence on the response.
+
+3. **ns(B, df = 3)**:
+   - While some coefficients for the Blue color variable (B) are positive, some interaction terms involving B and Lightness categories have negative coefficients, indicating that certain combinations of these variables have a negative influence on the response.
+
+#### The RMSE is least for this model with the values of 0.05778489. so enet_tune_10 is considered best model in this.
+#### Saving the 2 best performing models according to BIC for next parts.
+```{r}
+enet_tune_10 %>% readr::write_rds("enet_tune_10.rds")
+```
+
+## Neural Network:
+#### Training a neural network via the nnet package
+Training a neural network to predict response, with respect to all inputs. Since the neural network will attempt to create non-linear relationships, I'm not specifying interaction between the inputs.
+
+The dot operator streamlines the formula interface when the dataframe ONLY consists of inputs and the output.
+```{r}
+library(dplyr)
+
+df_caret <- train_dataset %>%
+  select(R, G, B, Hue, Lightness, Saturation, y)
+
+glimpse(df_caret)
+
+```
+Train, assess, and tune the nnet neural network with the defined resampling scheme. Assign the result to the nnet_default object and print the result to the screen.
+```{r}
+my_ctrl <- trainControl(method = 'repeatedcv', number = 10, repeats = 3, savePredictions = 'final')
+
+my_metric <- "RMSE"
+```
+
+```{r}
+set.seed(1234)
+
+nnet_default <- train( y ~ R + G + B + Hue + Saturation + Lightness,
+                       data = df_caret,
+                       method = 'nnet',
+                       metric = my_metric,
+                       preProcess = c("center", "scale"),
+                       trControl = my_ctrl,
+                       trace = FALSE)
+
+nnet_default
+```
+#### Default neural network accuracy:
+```{r}
+# Access the resampling results
+resampling_results <- nnet_default$resample
+
+# Extract Rsquared values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean Rsquared value as a proxy for accuracy
+rmse_nnd <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_nnd)
+
+```
+
+As shown by the above display, the best neural network has size = 5 and decay = 0.1. The best neural network therefore consists of 3 hidden units. This is not a large neural network. We would want to consider trying more hidden units to see if the results can be improved further.
+
+```{r}
+plot(nnet_default, xTrans=log)
+```
+
+
+The code chunk below defines a custom tuning grid focused on tuning the decay parameter. The decay parameter is just the regularization strength and thus is similar to lambda used in elastic net with the ridge penalty!
+
+```{r}
+nnet_grid <- expand.grid(size = c(5, 10, 20),
+                         decay = exp(seq(-6, 2, length.out=11)))
+
+nnet_grid %>% dim()
+```
+
+The more refined neural network tuning grid is used below.
+
+```{r}
+set.seed(1234)
+
+nnet_tune <- train( y ~ R + G + B + Hue + Saturation + Lightness,
+                    data = df_caret,
+                    method = 'nnet',
+                    metric = my_metric,
+                    tuneGrid = nnet_grid,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl,
+                    trace = FALSE)
+
+nnet_tune$bestTune
+```
+#### Tuned neural network accuracy:
+```{r}
+# Access the resampling results
+resampling_results <- nnet_tune$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_nnt <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_nnt)
+
+```
+The tuning results are visualized below for the refined larger neural network. By default caret identifies whichever model has the overall best performance. The plot below reveals there is very little difference between the smaller neural network with size 20 hidden units compared to the overall best with 5 hidden units. RMSE for tuned is lower than default.
+
+```{r}
+plot(nnet_tune, xTrans=log)
+```
+
+The tuning results are visualized below for the refined larger neural network. By default caret identifies whichever model has the overall best performance. The plot reveals there is significant difference between the smaller neural network with 5 hidden units compared to the overall best with 20 size. 
+
+The accuracy for model with tuned is significantly higher than default.
+
+### Use predictions to understand the behavior of the neural network. 
+
+The pred_viz_nnet_probs dataframe is column binded to the viz_grid dataframe. The new object, viz_nnet_df, provides the class predicted probabilities for each input combination in the visualization grid. 
+
+```{r}
+viz_grid %>% glimpse
+```
+
+```{r}
+pred_viz_nnet_probs <- predict( nnet_default, newdata = viz_grid)
+```
+```{r}
+viz_nnet_df <- viz_grid %>% bind_cols(pred_viz_nnet_probs)
+
+viz_nnet_df %>% glimpse()
+```
+
+The glimpse reveals that the event column stores the predicted event probability. Then visualize the predicted event probability in a manner consistent with the viz_bayes_logpost_preds() function and the tuned elastic net model predictions.
+Visualize the predicted probability as a line (curve) with respect to G, for each combination of B and R.
+
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+viz_nnet_df$B_range <- cut(viz_nnet_df$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+```
+
+### Visualize the predicted event probability of RGB:
+
+```{r}
+viz_nnet_df %>% 
+  ggplot(mapping = aes(x = G, y = viz_nnet_df[, 7])) +
+  geom_point(mapping = aes(color = R), size = 2.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  geom_density_2d() +  # Add contour lines to represent point density
+  theme_bw()
+```
+
+
+### Rationalizing the Graph (RGB):
+
+The decision to delve into RGB and HSL color models for understanding the response y stemmed from the quest to unravel the intricate relationship between color compositions and the response variable. By visually inspecting regression outcomes, our aim was to pinpoint color combinations within the RGB model that exhibit correlations with the response. At the project's inception, there was uncertainty regarding how the response was linked to the input variables. Hence, this exploration sought to shed light on which input parameters positively or negatively influence the response.
+
+### Insights from the RGB Graph:
+1. A notable trend emerges as the value of B increases, indicating a denser clustering of points. This suggests a positive relationship between higher B values and the response. Additionally, within a narrow range of G values (200 to 255), there is a significant contribution to the higher response value, particularly when G ranges from 200 to 255.
+2. Further analysis reveals that when G falls within the range of 200 to 255 and B ranges from 101 to 255, R values between 100 and 255 correspond to higher values of the response variable y.
+
+
+### Visualize the predicted event probability of HSL:
+```{r}
+viz_nnet_df %>% 
+  ggplot(mapping = aes(x = Hue, y = viz_nnet_df[, 7])) +
+  geom_point(mapping = aes(color = Lightness), size = 2.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  geom_density_2d() + 
+  theme_bw()
+```
+
+### Understanding the HSL Graph:
+The analysis of the HSL graph reveals that the majority of saturation features do not significantly contribute to higher values of the response variable. This suggests that saturation has minimal influence on driving the response to higher values.
+
+## Random forest:
+
+Let’s now a tree based method. You will use the default tuning grid. Tree based models do not have the same kind of preprocessing requirements as other models. Train a random forest binary classifier by setting the method argument equal to "rf". You must set importance = TRUE in the caret::train() function call. Assign the result to the rf_default variable. Display the rf_default object to the screen.
+
+The random forest model is trained and tuned below. The formula interface uses the . operator to streamline selecting all inputs in the df_caret dataframe.
+```{r}
+set.seed(1234)
+
+rf_default <- train( y ~ .,
+                     data = df_caret,
+                     method = 'rf',
+                     metric = my_metric,
+                     trControl = my_ctrl,
+                     importance = TRUE)
+
+rf_default
+```
+### RMSE for rf:
+```{r}
+# Access the resampling results
+resampling_results <- rf_default$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_rfd <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_rfd)
+
+```
+
+## Random forest behavior through predictions.
+Let's make predictions on the visualization grid, viz_grid, using the random forest model rf_default. Instruct thepredict()function to return the probabilities by setting type = ‘prob’.
+
+```{r}
+pred_viz_rf_probs <- predict( rf_default, newdata = viz_grid)
+```
+
+The pred_viz_rf_probs dataframe is column binded to the viz_grid dataframe. The new object, viz_rf_df, provides the class predicted probabilities for each input combination in the visualization grid according to the random forest model. 
+
+```{r, eval=TRUE}
+viz_rf_df <- viz_grid %>% bind_cols(pred_viz_rf_probs)
+
+viz_rf_df %>% glimpse()
+```
+The glimpse reveals that the popular column stores the predicted event probability. 
+
+#### Visualize the predicted event probability of RBG:
+
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+viz_rf_df$R_range <- cut(viz_rf_df$R, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_rf_df$G_range <- cut(viz_rf_df$G, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_rf_df$B_range <- cut(viz_rf_df$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+```
+
+```{r}
+viz_rf_df %>% 
+  ggplot(mapping = aes(x = G, y = viz_rf_df[, 7])) +
+  geom_point(mapping = aes(color = R),
+            size = 1.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  geom_density_2d() +
+  theme_bw()
+```
+
+### Motivation behind the Graph (RGB) - Random Forest Model:
+1. Visually, the higher values of R have postive impact on the response compared to the lower values of R.
+2. Suggests a positive correlation between the G (green) value and the response variable. As the G value increases, the response variable tends to increase as well. This indicates that higher levels of green in the color combination are associated with higher values of the response variable. Additionally, the color mapping of the points based on the R (red) value can help identify any patterns or relationships between the red component and the response variable within different ranges of the B (blue) component.
+
+#### Visualize the predicted event probability of HSL:
+
+```{r}
+viz_rf_df %>% 
+  ggplot(mapping = aes(x = Hue, y = viz_rf_df[, 7])) +
+  geom_point(mapping = aes(color = Lightness), size = 1.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  geom_density_2d() + 
+  theme_bw()
+```
+
+The predictions generated by the random forest model appear to be fluctuating abruptly and inconsistently.  This is because random forest is a tree based method. Decision trees do not produce smooth predictions.
+
+### Tuning Random Forests: I could not comprehend default tuning grid without tuneGrid so I defined the grid.
+
+```{r}
+# Define the grid of hyperparameters
+rf_grid <- expand.grid(
+  mtry = c(2, 4, 6),  
+  nodesize = c(5, 10, 20) 
+)
+
+# Check the dimensions of the grid
+rf_grid <- as.data.frame(rf_grid)
+```
+
+Training the random forest again:
+
+```{r}
+# Determine the number of predictor variables
+num_predictors <- ncol(df_caret) - 1
+
+# Train the random forest model
+rf_tune <- train(y ~ R + G + B + Hue + Saturation + Lightness,
+                 data = df_caret,
+                 method = 'rf', 
+                 metric = my_metric,
+                 tuneGrid = expand.grid(.mtry = seq(1, num_predictors)),
+                 preProcess = c("center", "scale"),
+                 trControl = my_ctrl,
+                 trace = FALSE)
+
+# Print the best hyperparameters
+rf_tune
+```
+*The RMSE for tuned rf - 0.07293949*
+
+```{r}
+# Access the resampling results
+resampling_results <- rf_tune$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_rft <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_rft)
+```
+**Based on the accuracy metric, the tuned random forest model appears to perform better than the default random forest model.**
+
+```{r}
+plot(rf_default, xTrans=log)
+plot(rf_tune, xTrans=log)
+```
+
+#### Tuned random forest behavior through predictions.
+
+```{r}
+pred_viz_rft_probs <- predict( rf_tune, newdata = viz_grid )
+```
+
+The pred_viz_rft_probs dataframe is column binded to the viz_grid dataframe. The new object, viz_rft_df, provides the class predicted probabilities for each input combination in the visualization grid according to the random forest model.
+
+```{r}
+viz_rft_df <- viz_grid %>% bind_cols(pred_viz_rft_probs)
+
+viz_rft_df %>% glimpse()
+```
+The glimpse reveals that the event column stores the predicted event probability for tuned Random forest.
+
+#### Visualize the predicted event probability of RBG for tuned Random forest:
+
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+viz_rft_df$R_range <- cut(viz_rf_df$R, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_rft_df$G_range <- cut(viz_rf_df$G, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_rft_df$B_range <- cut(viz_rf_df$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+```
+
+```{r}
+viz_rft_df %>% 
+  ggplot(mapping = aes(x = G, y = viz_rft_df[, 7])) +
+  geom_point(mapping = aes(color = R),
+            size = 1.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  geom_density_2d() +
+  theme_bw()
+```
+
+### Interpretations of the RGB Graph for Random Forest Model:
+
+The upward slope of the points in the graph indicates a positive correlation between the G (green) value and the response variable for the tuned random forest model. As the G value increases, the response variable tends to increase as well. This suggests that higher levels of green in the color combination are associated with higher values of the response variable. Additionally, the color mapping of the points based on the R (red) value helps identify any patterns or relationships between the red component and the response variable within different ranges of the B (blue) component, even after tuning the random forest model.
+
+### Visualize the predicted event probability of HSL:
+
+```{r}
+viz_rft_df %>% 
+  ggplot(mapping = aes(x = Hue, y = viz_rft_df[, 7])) +
+  geom_point(mapping = aes(color = Lightness), size = 2.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  geom_density_2d() + 
+  theme_bw()
+```
+
+# Gradient Boosted Tree Model
+
+The Gradient Boosted Tree model is trained and tuned below. 
+```{r}
+# Set the seed for reproducibility
+set.seed(1234)
+# Train the Gradient Boosted Trees model
+gbm_default <- train(y ~ .,
+                     data = df_caret,
+                     method = 'gbm',
+                     metric = "RMSE",
+                     trControl = my_ctrl,
+                     verbose = FALSE)
+
+# Print the default GBM model
+gbm_default$bestTune
+```
+
+#### RMSE:
+```{r}
+# Access the resampling results
+resampling_results <- gbm_default$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_gbmd <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_gbmd)
+```
+#### Examine the Gradient Boosted Trees behavior through predictions.
+
+```{r}
+pred_viz_gbm_probs <- predict( gbm_default, newdata = viz_grid )
+
+viz_gbm_df <- viz_grid %>% bind_cols(pred_viz_gbm_probs)
+
+viz_gbm_df %>% glimpse()
+```
+#### Visualize the predicted event probability for Gradient Boosted Trees: RGB
+
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+viz_gbm_df$R_range <- cut(viz_gbm_df$R, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_gbm_df$G_range <- cut(viz_gbm_df$G, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_gbm_df$B_range <- cut(viz_gbm_df$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+
+viz_gbm_df %>% 
+  ggplot(mapping = aes(x = G, y = viz_gbm_df[, 7])) +
+  geom_point(mapping = aes(color = R),
+            size = 1.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  geom_density_2d() +
+  theme_bw()
+```
+
+
+### Interpretations of the RGB Graph for GBM:
+The graph illustrates an upward trend between the G (green) value and the response variable in the tuned random forest model. As the G value increases, there is a corresponding rise in the response variable, indicating a positive correlation. This suggests that higher levels of green in the color composition tend to coincide with elevated values of the response variable. Moreover, when considering the color mapping based on the R (red) value, it becomes evident that darker shades of red have a more pronounced impact on the response compared to lighter shades.
+
+#### Visualize the predicted event probability for Gradient Boosted Trees: HSL
+
+
+```{r}
+viz_gbm_df %>% 
+  ggplot(mapping = aes(x = Hue, y = viz_gbm_df[, 7])) +
+  geom_point(mapping = aes(color = Lightness), size = 1.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  geom_density_2d() + 
+  theme_bw()
+```
+
+### Interpretations of the HSL Graph for GBM:
+
+1. **Color Range: Bright Green Tones**
+   - Hue (H): 20 to 35 ; Saturation (S): Gray; Lightness (L): saturated and soft
+   
+### Tuning and Training the Gradient Boosted Trees model
+
+```{r, evail=TRUE}
+
+# Train and tune the Gradient Boosted Trees model directly in the train function
+gbm_tune <- train(y ~ .,
+                  data = df_caret,
+                  method = 'gbm',
+                  metric = "RMSE",  # Use accuracy as the evaluation metric
+                  trControl = my_ctrl,
+                  tuneGrid = expand.grid(.n.trees = c(100, 200, 300),
+                                         .interaction.depth = seq(1, num_predictors),
+                                         .shrinkage = c(0.01, 0.1, 0.3),
+                                         .n.minobsinnode = c(5, 10, 20)),
+                  verbose = FALSE)
+gbm_tune$bestTune
+```
+#### RMSE:
+```{r}
+# Access the resampling results
+resampling_results <- gbm_tune$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_gbmt <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_gbmt)
+```
+
+#### Plotting Gradient Boosted Tree default and tuned model
+```{r}
+plot(gbm_default, xTrans=log)
+plot(gbm_tune, xTrans=log)
+```
+
+#### Tuned Gradient Boosted Trees model through predictions.
+```{r}
+pred_viz_gbmt_probs <- predict( gbm_tune, newdata = viz_grid )
+```
+The pred_viz_gbmt_probs dataframe is column binded to the viz_grid dataframe. The new object, viz_gbm_df, provides the class predicted probabilities for each input combination in the visualization grid according to the random forest model.
+
+```{r}
+viz_gbmt_df <- viz_grid %>% bind_cols(pred_viz_gbmt_probs)
+
+viz_gbmt_df %>% glimpse()
+```
+
+The glimpse reveals that the event column stores the predicted event probability for tuned Gradient Boosting Tree model.
+
+#### Visualize the predicted event probability of RBG for tuned Gradient Boosted Tree Model:
+
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+viz_gbmt_df$R_range <- cut(viz_gbmt_df$R, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_gbmt_df$G_range <- cut(viz_gbmt_df$G, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_gbmt_df$B_range <- cut(viz_gbmt_df$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+```
+
+
+```{r}
+viz_gbmt_df %>% 
+  ggplot(mapping = aes(x = G, y = viz_gbmt_df[, 7])) +
+  geom_point(mapping = aes(color = R),
+            size = 1.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  geom_density_2d() +
+  theme_bw()
+```
+
+#### Visualize the predicted event probability for Gradient Boosted Trees: HSL
+
+```{r}
+viz_gbmt_df %>% 
+  ggplot(mapping = aes(x = Hue, y = viz_gbmt_df[, 7])) +
+  geom_point(mapping = aes(color = Lightness), size = 1.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  geom_density_2d() + 
+  theme_bw()
+```
+
+# Generalized Additive Models (GAM) with caret:
+
+```{r}
+# Set seed for reproducibility
+set.seed(1234)
+
+gam_model <- train(
+  y ~ .,
+  data = df_caret,
+  method = "gam",
+  metric = "RMSE",
+  trControl = my_ctrl,
+  tuneGrid = expand.grid(
+    select = c(0.1, 0.2, 0.3),  # Specify the smoothing parameter values to tune
+    method = "GCV.Cp"            # Specify the method for tuning the smoothing parameter
+  )
+)
+
+# Print the best hyperparameters
+gam_model$bestTune
+```
+The output you provided indicates that the best hyperparameters chosen by the tuning process are:
+
+select: 0.1
+method: GCV.Cp
+Here's what each of these means:
+
+select: This corresponds to the smoothing parameter value chosen for the GAM model. Smoothing is a technique used in GAMs to deal with non-linear relationships between predictors and the response. A smaller select value indicates less smoothing, allowing the model to capture more complex patterns in the data. In this case, the tuning process has found that a select value of 0.1 resulted in the best performance based on the chosen metric (in this case, accuracy).
+method: This specifies the method used for tuning the smoothing parameter. In GAMs, there are different methods available for selecting the optimal smoothing parameter value. Common methods include generalized cross-validation (GCV) and the Cp criterion. Here, the tuning process used the GCV.Cp method.
+
+#### RMSE
+
+```{r}
+# Access the resampling results
+resampling_results <- gam_model$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_gamd <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_gamd)
+```
+```{r}
+pred_viz_gam_probs <- predict( gam_model, newdata = viz_grid )
+```
+```{r}
+viz_gam_df <- cbind(viz_grid, pred_viz_gam_probs)
+
+viz_gam_df %>% glimpse()
+```
+The glimpse reveals that the event column stores the predicted event probability. Then visualize the predicted event probability in a manner consistent with the viz_bayes_logpost_preds() function and the tuned elastic net model predictions. Visualize the predicted probability as a line (curve) with respect to G, for each combination of B and R.
+
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+viz_gam_df$R_range <- cut(viz_gam_df$R, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_gam_df$G_range <- cut(viz_gam_df$G, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_gam_df$B_range <- cut(viz_gam_df$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+
+```
+#### Visualize the predicted event probability of RGB:
+```{r}
+viz_gam_df %>% 
+  ggplot(mapping = aes(x = G, y = pred_viz_gam_probs)) +
+  geom_point(mapping = aes(color = R), size = 1.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  geom_density_2d() +  # Add contour lines to represent point density
+  theme_bw()
+```
+
+
+### Visualize the predicted event probability of HSL
+
+```{r}
+viz_gam_df %>% 
+  ggplot(mapping = aes(x = Hue, y = pred_viz_gam_probs)) +
+  geom_point(mapping = aes(color = Lightness), size = 2.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  geom_density_2d() + 
+  theme_bw()
+```
+Tuning Generalized Additive Models (GAM):
+
+```{r}
+tuning_results <- gam_model$results
+print(tuning_results)
+
+```
+### Tuning the more refined GAM grid is used below.
+```{r}
+# Set seed for reproducibility
+set.seed(1234)
+
+gam_tune <- train(
+  y ~ .,
+  data = df_caret,
+  method = "gam",
+  metric = "RMSE",
+  trControl = my_ctrl,
+  tuneGrid = expand.grid(
+    select = c(0.3, 3, 6),  # Specify the smoothing parameter values to tune
+    method = "GCV.Cp"            # Specify the method for tuning the smoothing parameter
+  )
+)
+```
+```{r}
+# Print the best hyperparameters
+gam_tune$results
+```
+
+#### RMSE
+```{r}
+# Access the resampling results
+resampling_results <- gam_tune$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_gamt <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_gamt)
+```
+```{r}
+pred_viz_gamt_probs <- predict( gam_tune, newdata = viz_grid )
+```
+```{r}
+viz_gamt_df <- cbind(viz_grid, pred_viz_gamt_probs)
+
+viz_gamt_df %>% glimpse()
+```
+
+#### Use predictions to understand the behavior of the GAM
+```{r}
+# Define custom breaks for B
+breaks <- c(0, 50, 100, 150, 200, 255)
+
+# Create labels for the breaks
+labels <- c("0-50", "51-100", "101-150", "151-200", "201-255")
+
+# Add breaks and labels to the B variable
+viz_gamt_df$R_range <- cut(viz_gamt_df$R, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_gamt_df$G_range <- cut(viz_gamt_df$G, breaks = breaks, labels = labels, include.lowest = TRUE)
+viz_gamt_df$B_range <- cut(viz_gamt_df$B, breaks = breaks, labels = labels, include.lowest = TRUE)
+```
+
+#### Visualize the predicted event probability of RGB:
+
+```{r}
+viz_gamt_df %>% 
+  ggplot(mapping = aes(x = G, y = pred_viz_gamt_probs)) +
+  geom_point(mapping = aes(color = R), size = 1.0) +
+  facet_wrap(~B_range, labeller = 'label_both') +
+  geom_density_2d() +  # Add contour lines to represent point density
+  theme_bw()
+```
+
+#### Visualize the predicted event probability of HSL:
+```{r}
+viz_gamt_df %>% 
+  ggplot(mapping = aes(x = Hue, y = pred_viz_gamt_probs)) +
+  geom_point(mapping = aes(color = Lightness), size = 2.0) +
+  facet_wrap(~Saturation, labeller = 'label_both') +
+  geom_density_2d() + 
+  theme_bw()
+
+```
+
+
+#KNN
+
+K-Nearest Neighbors (KNN) is a simple yet effective algorithm used for both classification and regression tasks. It works by identifying the K nearest data points to a given query point and predicting the class or value based on the most common class or average value among its neighbors, respectively.
+
+We now train the KNN model using the train function from the caret package. We specify the method as "knn" and use accuracy as the evaluation metric.
+
+```{r}
+set.seed(1234)
+
+knn_default <- train(y ~ .,
+                     data = df_caret,
+                     method = "knn",
+                     trControl = my_ctrl,
+                     tuneLength = 10)  # Set the desired value of K
+
+knn_default
+```
+
+From the above outcomes we can see that,
+
+The k-Nearest Neighbors (KNN) algorithm was applied to classify samples into 'popular_paint' and 'non_popular_paint' classes using a dataset with 835 samples and 6 predictor variables. Through cross-validated performance evaluation, KNN was tuned over a range of K values from 5 to 23. The optimal model achieved an accuracy of approximately 80.48% with a K value of 9. This indicates that when considering the 9 nearest neighbors, the model correctly predicts the class label for about 80.48% of the samples. KNN's simplicity and effectiveness make it a valuable tool for classification tasks, especially when dealing with relatively small datasets.
+#### RMSE
+```{r}
+# Access the resampling results
+resampling_results <- knn_default$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_knnd <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_knnd)
+```
+**Predictions to understand the behavior of the model**
+
+```{r}
+
+# Predictions to understand the behavior of the Gradient Boosted Trees model
+pred_viz_knn_probs <- predict(knn_default, newdata = viz_grid)
+
+# Combine predictions with visualization grid
+viz_knn_df <- cbind(viz_grid, pred_viz_knn_probs)
+
+# Display a glimpse of the combined dataframe
+viz_knn_df %>% glimpse()
+```
+
+**Plot for nb_default **
+
+Lets try to analyze it by a graph
+
+```{r}
+plot(knn_default,main="KNN Default Plot", xTrans=log)
+```
+
+The plot showcases the relationship between the number of neighbors (K) considered in the k-Nearest Neighbors (KNN) algorithm and the corresponding classification accuracy. As the number of neighbors increases from 0 to 4 along the x-axis, the accuracy initially declines until it reaches its lowest point around 2.6. Subsequently, there's a gradual rise in accuracy until approximately 2.8 neighbors, followed by a slight decrease. Notably, the highest accuracy is achieved when K equals 1, denoting that the model performs optimally when considering only the nearest neighbor for classification. This pattern suggests a trade-off between the complexity of the model (as determined by the number of neighbors) and its predictive accuracy, with an optimal balance observed at K=1.
+
+**Tuning KNN **
+
+```{r}
+# Define a tuning grid for KNN
+knn_grid <- expand.grid(k = seq(1, 20, by = 2))  # Define the range of K values
+
+set.seed(1234)
+
+knn_tune <- train(y ~ .,
+                  data = df_caret,
+                  method = "knn",
+                  trControl = my_ctrl,
+                  tuneGrid = knn_grid)
+
+knn_tune
+
+```
+#### RMSE
+```{r}
+# Access the resampling results
+resampling_results <- knn_tune$resample
+
+# Extract RMSE values
+rmse_values <- resampling_results$RMSE
+
+# Calculate mean RMSE value as a proxy for accuracy
+rmse_knnt <- mean(rmse_values, na.rm = TRUE)
+
+# Print the accuracy
+print(rmse_knnt)
+```
+
+**Predictions to understand the behavior of the tuned knn model**
+
+```{r}
+
+# Predictions to understand the behavior of the Gradient Boosted Trees model
+pred_viz_knn_tune_probs <- predict(knn_tune, newdata = viz_grid)
+
+# Combine predictions with visualization grid
+viz_knn_tune_df <- cbind(viz_grid, pred_viz_knn_tune_probs)
+
+# Display a glimpse of the combined dataframe
+viz_knn_tune_df %>% glimpse()
+```
+
+
+**Plotting Tuned model**
+
+```{r}
+# Plot the performance of Naive Bayes model
+
+plot(knn_default, main="KNN Tuned Plot", xTrans=log)
+```
+
+**Predictions**
+
+```{r}
+# Predictions for Naive Bayes default model
+pred_viz_knn_probs_default <- predict(knn_default, newdata = viz_grid)
+
+# Combine predictions with the visualization grid
+viz_knn_df_default <- bind_cols(viz_grid, as.data.frame(pred_viz_knn_probs_default))
+
+# Glimpse the combined dataframe
+glimpse(viz_knn_df_default)
+
+# Predictions for tuned Naive Bayes model
+pred_viz_knn_probs_tune <- predict(knn_tune, newdata = viz_grid)
+
+# Combine predictions with the visualization grid
+viz_knn_df_tune <- bind_cols(viz_grid, as.data.frame(pred_viz_knn_probs_tune))
+
+# Glimpse the combined dataframe
+glimpse(viz_knn_df_tune)
+
+```
+
+
+
+**Visulatization**
+
+```{r}
+viz_knn_df_default %>% 
+  ggplot(mapping = aes(x = Hue, y = pred_viz_knn_probs_default, color=B)) +
+  geom_point(size = 1) +
+  facet_wrap(~Lightness, labeller = 'label_both') +
+  scale_color_gradient(low = "#00FFFF", high = "#104E8B") +
+  theme_bw()
+
+```
+**Tuned Predicted Probability of outcome for Naive Bayes**
+
+```{r}
+viz_grid %>% 
+  ggplot(mapping = aes(x = Hue, y = pred_viz_knn_probs_tune, color = B)) +
+  geom_point(size = 1) +  
+  facet_wrap(~Lightness, labeller = 'label_both') +
+  scale_color_gradient(low = "#00FFFF", high = "#104E8B") +
+  theme_bw()
+
+```
+
+For most of the models above:
+1. **Accuracy as the Evaluation Metric:**
+   - Accuracy is a straightforward metric that measures the proportion of correctly classified instances out of the total instances.
+   - It is easy to interpret and understand, making it a popular choice for classification tasks.
+   - Especially in balanced datasets (where the classes are roughly equal in size), accuracy provides a good overall measure of model performance.
+
+2. **k-Fold Cross-Validation:**
+   - k-Fold Cross-Validation is a robust resampling technique for estimating the performance of a predictive model.
+   - It divides the dataset into k equal-sized folds and iteratively trains the model on k-1 folds while using the remaining fold for validation.
+   - This process is repeated k times, with each fold used exactly once as the validation set.
+   - It helps in reducing bias and variance in model evaluation by using multiple train-test splits of the dataset.
+   - k-Fold Cross-Validation provides a more accurate estimate of model performance compared to a single train-test split, especially when the dataset is limited.
+
+By combining accuracy as the evaluation metric with k-fold cross-validation as the resampling scheme, you ensure that:
+- The model is evaluated based on its ability to correctly classify instances.
+- The model's performance is assessed robustly across multiple train-test splits of the data, reducing the risk of overfitting or underfitting.
+
+#### Identifying the best model
+
+```{r}
+library(ggplot2)
+
+# Create a data frame with model names and RMSE values
+model_rmse <- data.frame(Model = c("Neural Network", "Random Forest", "GBM", "GAM", "KNN"),
+                          RMSE = c(rmse_nnt, rmse_rft, rmse_gbmd, rmse_gamd, rmse_knnd))
+
+# Plot the bar graph
+ggplot(model_rmse, aes(x = Model, y = RMSE, fill = Model)) +
+  geom_bar(stat = "identity") +
+  labs(title = "RMSE Values for Different Models",
+       x = "Model",
+       y = "RMSE") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+##### The best model according to RMSE is GAM with 0.05680793645.
+gam_tune
+#### Saving the 2 best performing models according to BIC for next parts.
+```{r}
+gam_tune %>% readr::write_rds("gam_tune.rds")
+```

@@ -1,0 +1,479 @@
+---
+title: "INFSCI 2595 Spring 2024 Final Project"
+author: "SHUSRITA VENUGOPAL"
+date: "2024-04-16"
+output: html_document
+---
+
+# Load packages
+The tidyverse is loaded in the code chunk below. The visualization package, ggplot2, and the data manipulation package, dplyr, are part of the “larger” tidyverse.
+```{r setup, include=FALSE}
+library(tidyverse)
+```
+The modelr package is loaded in the code chunk below. From modelr we could use functions to calculate performance metrics for your models.
+```{r, solution1}
+library(modelr)
+```
+
+# Loading the dataset
+```{r, solution1a}
+train_dataset_csv <- 'paint_project_train_data.csv'
+
+train_dataset <- readr::read_csv(train_dataset_csv, col_names = TRUE)
+```
+# A glimpse of the data
+```{r, solution1b}
+train_dataset |> glimpse()
+```
+R, G, B (Red, Green, Blue): Components of the RGB color model representing the intensity of red, green, and blue in the paint color. Lightness: Categorizes the paint color into different levels of darkness or lightness.
+Saturation: Represents the intensity or purity of the color, categorizing it into different levels of brightness.
+Hue: Indicates the color attribute of the paint, distinguishing it as red, blue, yellow, etc., represented as an angle in the HSL color model.
+Response: A continuous output representing an important paint property.
+Outcome: A binary output indicating the popularity of the paint color, with 1 denoting popular colors and 0 denoting less popular ones.
+
+# Data Exploration
+
+## Convert categorical data into numerical form using label encoding
+```{r, solution1c}
+# Convert Lightness to numerical values
+train_dataset$LightnessNum <- as.integer(factor(train_dataset$Lightness, levels = unique(train_dataset$Lightness)))
+
+# Convert Saturation to numerical values
+train_dataset$SaturationNum <- as.integer(factor(train_dataset$Saturation, levels = unique(train_dataset$Saturation)))
+
+train_dataset |> glimpse()
+```
+## Create a new column "y" which represents the logit transformed response column
+```{r, solution1d}
+# Calculate logit transformed response
+train_dataset$y <- boot::logit((train_dataset$response - 0) / (100 - 0))
+train_dataset |> glimpse()
+```
+Why is this logit transformation important?
+- We need to transform the response column because the response values are bounded between 0 and 100, which is not suitable for Gaussian likelihoods.
+- Gaussian likelihoods assume that the response variable follows a normal distribution, which is unbounded. Bounded response values can lead to model bias and inaccurate predictions.
+- The logit transformation is used to convert bounded response values to unbounded variables. It maps the bounded values to a continuous range between negative infinity and positive infinity.
+- The formula for logit transformation is:
+$$
+y = \frac{response - lower}{upper - lower}
+$$
+Let's check the datatype of each column:
+```{r, solution1e}
+# Check the data types of each column
+str(train_dataset)
+```
+```{r, solution1ea}
+# Check summary statistics for numerical columns
+summary(train_dataset)
+```
+Based on the output, we can categorize the columns as follows:
+
+1. Continuous columns (numerical):R, G, B, Hue.
+2. Binary columns (numerical): outcome.
+3. Categorical columns: Lightness, Saturation.
+
+### To visualize the counts for categorical variables in the dataset, we can use bar plots.
+```{r, solution1f}
+library(ggplot2)
+
+# Counts for Lightness
+lightness_counts <- train_dataset %>%
+  group_by(Lightness) %>%
+  summarise(count = n())
+
+# Bar plot for Lightness
+ggplot(lightness_counts, aes(x = Lightness, y = count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Counts for Lightness", x = "Lightness", y = "Count") +
+  theme_minimal()
+
+# Counts for Saturation
+saturation_counts <- train_dataset %>%
+  group_by(Saturation) %>%
+  summarise(count = n())
+
+# Bar plot for Saturation
+ggplot(saturation_counts, aes(x = Saturation, y = count)) +
+  geom_bar(stat = "identity", fill = "salmon") +
+  labs(title = "Counts for Saturation", x = "Saturation", y = "Count") +
+  theme_minimal()
+
+```
+### Create histograms for continuous variables in the dataset
+```{r}
+library(gridExtra)
+
+# Histogram for R
+histogram_R <- ggplot(train_dataset, aes(x = R)) +
+  geom_histogram(fill = "lightblue", color = "black", bins = 20) +
+  labs(title = "Histogram of R", x = "R", y = "Frequency") +
+  theme_minimal()
+
+# Histogram for G
+histogram_G <- ggplot(train_dataset, aes(x = G)) +
+  geom_histogram(fill = "lightgreen", color = "black", bins = 20) +
+  labs(title = "Histogram of G", x = "G", y = "Frequency") +
+  theme_minimal()
+
+# Histogram for B
+histogram_B <- ggplot(train_dataset, aes(x = B)) +
+  geom_histogram(fill = "lightpink", color = "black", bins = 20) +
+  labs(title = "Histogram of B", x = "B", y = "Frequency") +
+  theme_minimal()
+
+# Density plot for Hue
+density_Hue <- ggplot(train_dataset, aes(x = Hue)) +
+  geom_histogram(fill = "lightyellow", color = "black") +
+  labs(title = "Density Plot of Hue", x = "Hue", y = "Density") +
+  theme_minimal()
+
+# Histogram for y, response transformed by logit
+histogram_response <- ggplot(train_dataset, aes(x = y)) +
+  geom_histogram(fill = "lightcoral", color = "black", bins = 20) +
+  labs(title = "Histogram of y", x = "y", y = "Frequency") +
+  theme_minimal()
+
+# Combine plots into one grid
+grid.arrange(histogram_R, histogram_G, histogram_B, density_Hue, histogram_response, ncol = 3)
+```
+Plotting a histogram of the data can provide a visual representation of the distribution's shape. A Gaussian distribution typically appears symmetric with a bell-shaped curve.
+Are the distributions Gaussian like?
+The histogram for R, G B and hue does not look symmetric and they don't look like gaussian.
+
+At this point, I'm considering transforming R, G, B and hue values by logit. Applying a logit transformation is typically used to transform bounded or non-normal data to a more Gaussian-like distribution.
+
+```{r, solution144}
+# Apply logit transformation to R, G, B, and Hue
+train_dataset$logit_R <- boot::logit((train_dataset$R - min(train_dataset$R)) / (max(train_dataset$R) - min(train_dataset$R)))
+train_dataset$logit_G <- boot::logit((train_dataset$G - min(train_dataset$G)) / (max(train_dataset$G) - min(train_dataset$G)))
+train_dataset$logit_B <- boot::logit((train_dataset$B - min(train_dataset$B)) / (max(train_dataset$B) - min(train_dataset$B)))
+train_dataset$logit_Hue <- boot::logit((train_dataset$Hue - min(train_dataset$Hue)) / (max(train_dataset$Hue) - min(train_dataset$Hue)))
+
+# View the modified dataset
+head(train_dataset)
+```
+```{r, solution1g}
+library(gridExtra)
+
+# Histogram for R
+histogram_R <- ggplot(train_dataset, aes(x = logit_R)) +
+  geom_histogram(fill = "lightblue", color = "black", bins = 20) +
+  labs(title = "Histogram of R", x = "R", y = "Frequency") +
+  theme_minimal()
+
+# Histogram for G
+histogram_G <- ggplot(train_dataset, aes(x = logit_G)) +
+  geom_histogram(fill = "lightgreen", color = "black", bins = 20) +
+  labs(title = "Histogram of G", x = "G", y = "Frequency") +
+  theme_minimal()
+
+# Histogram for B
+histogram_B <- ggplot(train_dataset, aes(x = logit_B)) +
+  geom_histogram(fill = "lightpink", color = "black", bins = 20) +
+  labs(title = "Histogram of B", x = "B", y = "Frequency") +
+  theme_minimal()
+
+# Density plot for Hue
+density_Hue <- ggplot(train_dataset, aes(x = logit_Hue)) +
+  geom_histogram(fill = "lightyellow", color = "black") +
+  labs(title = "Density Plot of Hue", x = "Hue", y = "Density") +
+  theme_minimal()
+
+# Combine plots into one grid
+grid.arrange(histogram_R, histogram_G, histogram_B, density_Hue, ncol = 4)
+```
+
+## Condition (group) the continuous variables based on the categorical variables.
+To group continuous input distributions based on the categorical input. We can use boxplots to focus on the distribution summary statistics.
+### Grouping by Lightness
+```{r, solution1h}
+# Convert data to long format
+long_data <- train_dataset %>%
+  pivot_longer(cols = c(R, G, B, Hue),
+               names_to = "variable",
+               values_to = "value")
+
+# Create boxplot
+ggplot(long_data, aes(x = Lightness, y = value)) +
+  geom_boxplot() +
+  facet_wrap(~ variable, scales = "free") +
+  labs(x = "Lightness", y = "Value", title = "Boxplot of Continuous Variables Grouped by Lightness")
+```
+To compare the differences in continuous variable distributions and continuous variable summary statistics based on lightness, I computed summary statistics for each continuous variable grouped by lightness. And there are no major differences between the continuous variable distributions and continuous variable summary statistics for each continuous variable. But There are noticeable differences in the summary statistics of R and G values across different categories of Lightness.
+```{r, solution1h2}
+# Compute summary statistics for each continuous variable grouped by different levels of the categorical variable
+summary_stats <- train_dataset %>%
+  group_by(Lightness) %>%
+  summarize(
+    mean_R = mean(R),
+    median_R = median(R),
+    sd_R = sd(R),
+    mean_G = mean(G),
+    median_G = median(G),
+    sd_G = sd(G),
+    mean_B = mean(B),
+    median_B = median(B),
+    sd_B = sd(B),
+    mean_Hue = mean(Hue),
+    median_Hue = median(Hue),
+    sd_Hue = sd(Hue)
+  )
+
+# View the summary statistics
+summary_stats
+```
+### Grouping by Saturation
+```{r, solution1h1}
+# Create boxplot
+ggplot(long_data, aes(x = Saturation, y = value)) +
+  geom_boxplot() +
+  facet_wrap(~ variable, scales = "free") +
+  labs(x = "Saturation", y = "Value", title = "Boxplot of Continuous Variables Grouped by Saturation")
+```
+To compare the differences in continuous variable distributions and continuous variable summary statistics based on lightness, I computed summary statistics for each continuous variable grouped by Saturation And there are no major differences in the continuous variable distributions and continuous variable summary statistics. But there are differences in the summary statistics of R and G values across different categories of Saturation.
+- Pure colors tend to have higher mean R and G values compared to gray or subdued colors.
+- Pure colors exhibit higher variability in R and G values, as indicated by their higher standard deviations.
+- Gray colors show relatively lower mean R and G values compared to other categories, with lower variability as indicated by their lower standard deviations.
+- Similar patterns can be observed for both R and G values across different Saturation categories.
+```{r, solution1h3}
+# Compute summary statistics for each continuous variable grouped by different levels of the categorical variable
+summary_stats <- train_dataset %>%
+  group_by(Saturation) %>%
+  summarize(
+    mean_R = mean(R),
+    median_R = median(R),
+    sd_R = sd(R),
+    mean_G = mean(G),
+    median_G = median(G),
+    sd_G = sd(G),
+    mean_B = mean(B),
+    median_B = median(B),
+    sd_B = sd(B),
+    mean_Hue = mean(Hue),
+    median_Hue = median(Hue),
+    sd_Hue = sd(Hue)
+  )
+
+# View the summary statistics
+summary_stats
+```
+### Grouping by Outcome - binary variable.
+We can include a logistic regression smoother to help visualize the changes in the event probability. You will use the geom_smooth() function to do so. The geom_jitter() function adds small amounts of random noise to “jitter” or perturb the locations of the points. This will make it easier to see the individual observations of the binary outcome. The formula argument are “local” variables associated with the aesthetics. Thus the formula y ~ x means the y aesthetic is linearly related to the x aesthetic. However, by specifying method = glm and method.args = list(family = 'binomial') instructing geom_smooth() to fit a logistic regression model. Thus, you are actually specifying that the linear predictor, the log-odds ratio is linearly related to the x aesthetic.
+
+```{r}
+ggplot(long_data, aes(x = value, y = outcome)) +
+  geom_jitter(height = 0.02, width = 0) +
+  geom_smooth(formula = y ~ x,
+              method = glm,
+              method.args = list(family = 'binomial')) +
+  facet_wrap(~ variable, scales = "free") +
+  labs(x = "Value", y = "Outcome", title = "Jitter plot of Continuous Variables Grouped by outcome")
+```
+To compare the differences in continuous variable distributions and continuous variable summary statistics based on lightness, I computed summary statistics for each continuous variable grouped by outcome.
+In the jitter plot, you can find the mean by visually inspecting the distribution of points along the y-axis for each group. Identify the group you are interested in (e.g., outcome = 0 or outcome = 1). identify the spread of points along the y-axis within that group. Estimate the central tendency of the points, which can be approximated by the mean. Visually estimate the mean by locating the center of the distribution of points along the y-axis.
+There are differences in the summary statistics of R and G values between the two outcomes:
+- Outcome 0 tends to have higher mean R and G values compared to Outcome 1.
+- Outcome 0 exhibits higher variability in R and G values, as indicated by the higher standard deviations.
+- Outcome 1 shows relatively lower mean R and G values compared to Outcome 0, with lower variability as indicated by the lower standard deviations.
+- Similar patterns can be observed for both R and G values between the two outcomes.
+
+```{r, solution1h4}
+# Compute summary statistics for each continuous variable grouped by different levels of the categorical variable
+summary_stats <- train_dataset %>%
+  group_by(outcome) %>%
+  summarize(
+    mean_R = mean(R),
+    median_R = median(R),
+    sd_R = sd(R),
+    mean_G = mean(G),
+    median_G = median(G),
+    sd_G = sd(G),
+    mean_B = mean(B),
+    median_B = median(B),
+    sd_B = sd(B),
+    mean_Hue = mean(Hue),
+    median_Hue = median(Hue),
+    sd_Hue = sd(Hue)
+  )
+
+# View the summary statistics
+summary_stats
+```
+
+```{r}
+# Create boxplot
+ggplot(long_data, aes(x = as.factor(outcome), y = value)) +
+  geom_boxplot() +
+  facet_wrap(~ variable, scales = "free") +
+  labs(x = "outcome", y = "Value", title = "Boxplot of Continuous Variables Grouped by Saturation")
+```
+
+## Visualize the relationships between the continuous inputs, are they correlated?
+To visualize the relationships between continuous inputs and assess their correlation, we can create a correlation matrix and plot it using a heatmap. This heatmap will provide a visual representation of the correlation coefficients between pairs of continuous variables.
+```{r, solution1h43}
+# Subset the dataframe to include only the continuous variables
+# Convert correlation matrix to data frame
+df <- as.data.frame(train_dataset)
+continuous_vars <- df[, c("R", "G", "B", "Hue")]
+
+# Compute the correlation matrix
+correlation_matrix <- cor(continuous_vars)
+
+# Visualize the correlation matrix using a heatmap
+library(corrplot)
+corrplot(correlation_matrix, method = "color")
+```
+
+## Visualize the relationships between the continuous outputs (response and the LOGIT-transformed response, y) with respect to the continuous INPUTS.
+```{r}
+library(gridExtra)
+
+# Scatter plots for response vs. continuous inputs
+scatter_plots_response <- lapply(c("R", "G", "B", "Hue"), function(variable) {
+  ggplot(train_dataset, aes_string(x = variable, y = "response")) +
+    geom_point() +
+    labs(x = variable, y = "Response", title = paste("Response vs.", variable))
+})
+
+# Scatter plots for y vs. continuous inputs
+scatter_plots_y <- lapply(c("R", "G", "B", "Hue"), function(variable) {
+  ggplot(train_dataset, aes_string(x = variable, y = "y")) +
+    geom_point() +
+    labs(x = variable, y = "Logit-transformed Response (y)", title = paste("y vs.", variable))
+})
+
+# Combine scatter plots for response into a grid
+grid_response <- do.call(grid.arrange, c(scatter_plots_response, ncol = 2))
+
+# Combine scatter plots for y into a grid
+grid_y <- do.call(grid.arrange, c(scatter_plots_y, ncol = 2))
+
+# Show the grids
+grid_response
+grid_y
+```
+### Can you identify any clear trends?
+Yes, Explanation of the trends observed in the scatter plots:
+1. **R, G, B Trends**:
+  - The plots for G exhibit a linear trend, with all data points closely aligned along a steeply sloping line. This suggests a strong positive correlation between higher values of G and elevated logit-transformed response values.
+   - In the scatter plots for R, G, and B versus response (paint property), we observe a clear trend where the points tend to form a line that slopes upwards with a positive slope showing linear relationship.
+   - This upward trend indicates that as the values of R, G, and B increase, the corresponding response values also tend to increase.
+   - The density of points is higher towards the upper end of the color spectrum, indicating that paints with higher RGB values (i.e., brighter colors) tend to have higher response values, suggesting they are associated with more favorable paint properties.
+   - Conversely, for lower values of R, G, and B (darker colors), the response values are more scattered, indicating a wider variability in paint properties.
+   - While the plots for R and B also display a slanting line indicative of a positive correlation, the points are more scattered. This implies that while higher values of R and B tend to correspond to increased logit-transformed response values, the relationship is not as tightly defined as in the case of G.
+   
+2. **Hue Trend**:
+   - In contrast to R, G, and B, the scatter plot for Hue versus response does not exhibit a clear pattern or trend.
+   - The points are scattered across the plot without showing any discernible relationship between Hue and response.
+   - This lack of trend suggests that the Hue component alone may not be a significant predictor of paint properties, at least not in a linear relationship.
+   
+   
+### Do the trends depend on the categorical INPUTS?
+3. **Dependence on Categorical Inputs**:
+- Based on the analysis of the scatter plots for R, G, B, and Hue versus response and y variables, it appears that the observed trends in the continuous inputs (R, G, B, and Hue) do not significantly depend on the categorical inputs such as Saturation and Lightness. Since R, G, and B belong to the RGB color model, they inherently represent different aspects of color intensity and are not directly influenced by characteristics like lightness and saturation.
+
+- In contrast, the Hue variable, which represents the color tone or hue, may be influenced by other categorical variables such as Saturation and Lightness. The scatter plot for Hue versus response and y did not show any clear pattern or trend, suggesting that Hue's relationship with paint properties may be more influenced by other color characteristics captured by the categorical inputs.
+
+Sure, here's the code to visualize the binary outcome with respect to the continuous inputs using scatterplots with jitter and logistic regression smoother, combined in a grid:
+
+## How can you visualize the behavior of the binary outcome with respect to the continuous inputs?
+- We can use geom_jitter() function.
+- Scatterplots with jitter and logistic regression smoother help visualize the relationship between continuous inputs and binary outcomes.
+- Jitter is added to the points to prevent overplotting and make individual observations visible.
+- The logistic regression smoother provides an estimate of the probability of the binary outcome based on the continuous input, showing how the probability changes with the input variable.
+- These plots help identify trends and patterns in the relationship between continuous inputs and binary outcomes, aiding in understanding the predictive power of the continuous variables for the binary outcome.
+```{r}
+# Create scatterplots of each continuous input against the binary outcome with logistic regression smoother
+scatterplot_R <- ggplot(train_dataset, aes(x = R, y = outcome)) +
+  geom_jitter(width = 0.2, height = 0.02) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+  labs(x = "R", y = "Outcome", title = "Scatterplot of R vs Outcome with Logistic Regression Smoother")
+
+scatterplot_G <- ggplot(train_dataset, aes(x = G, y = outcome)) +
+  geom_jitter(width = 0.2, height = 0.02) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+  labs(x = "G", y = "Outcome", title = "Scatterplot of G vs Outcome with Logistic Regression Smoother")
+
+scatterplot_B <- ggplot(train_dataset, aes(x = B, y = outcome)) +
+  geom_jitter(width = 0.2, height = 0.02) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+  labs(x = "B", y = "Outcome", title = "Scatterplot of B vs Outcome with Logistic Regression Smoother")
+
+scatterplot_Hue <- ggplot(train_dataset, aes(x = Hue, y = outcome)) +
+  geom_jitter(width = 0.2, height = 0.02) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+  labs(x = "Hue", y = "Outcome", title = "Scatterplot of Hue vs Outcome with Logistic Regression Smoother")
+
+# Combine all scatterplots in a grid
+grid.arrange(scatterplot_R, scatterplot_G, scatterplot_B, scatterplot_Hue, ncol = 2)
+```
+## How can you visualize the behavior of the binary outcome with respect to the categorical INPUTS?
+We can create a bar chart for the categorical input x1 with ggplot2 and can fill aesthetic to as.factor(y). The data type conversion function as.factor() can be applied in-line. This will force a categorical fill palette to be used rather than a continuous palette.
+Visualization
+```{r}
+# Create the first bar chart
+plot1 <- train_dataset %>% 
+  ggplot(mapping = aes(x = Lightness)) +
+  geom_bar(mapping = aes(fill = as.factor(outcome)), position = 'fill') +
+  labs(y = 'Group Proportion') +
+  theme_bw()
+
+# Create the second bar chart
+plot2 <- train_dataset %>% 
+  ggplot(mapping = aes(x = Saturation)) +
+  geom_bar(mapping = aes(fill = as.factor(outcome)), position = 'fill') +
+  labs(y = 'Group Proportion') +
+  theme_bw()
+
+# Combine the plots into a grid
+grid.arrange(plot1, plot2, ncol = 1)
+```
+Observations:
+
+Lightness:
+- In the graph for lightness, each value corresponding to dark, deep, light, midtone, pale, saturated, and soft has approximately 75% of outcome 0 (not liked by people) and 25% of outcome 1 (liked by people).
+- This suggests that there is no significant variation in the proportion of liked and not liked outcomes across different lightness values. Lightness alone may not be a strong predictor of paint color popularity.
+
+Saturation:
+- In the graph for saturation, only the gray color has a higher number of outcome 1 (liked by people), while the rest of the values like bright, muted, neutral, pure, shaded, and subdued have a lower number of outcome 1.
+- This indicates that paint colors with a gray saturation tend to be liked by people more often compared to other saturation levels.
+- Saturation might have a more noticeable impact on paint color popularity compared to lightness, as certain saturation levels are associated with higher proportions of liked outcomes.
+
+Overall, while lightness alone does not show a clear trend in paint color popularity, saturation, particularly gray saturation, appears to have a stronger influence on whether a paint color is liked or not liked by people.
+I also combined both the categorical inputs (Lightness and Saturation) based on outcome (binary).
+The graph visualizes the relationship between three categorical variables:
+1. Lightness: This likely refers to the lightness or darkness of a color.
+2. Saturation: This likely refers to the intensity or purity of a color.
+3. Outcome: This is a binary variable, possibly representing some classification or grouping (represented by the colors in the bars).
+
+Below are my observations on the combination and how outcome is impacted:
+In the combined plot, the gray saturation level appears to have a consistent trend across different lightness values. Specifically, for all lightness values (dark, deep, light, midtone, pale, saturated, and soft), the gray saturation level consistently exhibits the highest proportion of outcome 1, indicating popularity compared to all other saturation levels.
+
+This suggests that paint colors with a gray saturation level are generally preferred or liked by people across a wide range of lightness values. Gray saturation might have a universal appeal or aesthetic attractiveness that transcends differences in lightness.
+
+Additionally, this observation underscores the importance of considering both saturation and lightness in understanding the popularity of paint colors. While lightness contributes to the perception of brightness or darkness, saturation plays a crucial role in determining the intensity or purity of a color. In this case, the combination of gray saturation with various lightness values consistently results in higher proportions of liked outcomes, highlighting the significance of color intensity in paint color preference.
+```{r}
+# Combine the two bar charts using facets with space between facets
+combined_plot <- train_dataset %>% 
+  ggplot() +
+  geom_bar(mapping = aes(x = Lightness, fill = as.factor(outcome)), position = 'fill') +
+  facet_wrap(~Saturation, scales = 'free') +  # Allow scales to be free
+  labs(y = 'Group Proportion') +
+  theme_bw() +
+  theme(
+    strip.text = element_text(margin = margin(b = 10)),  # Add margin to text
+    strip.background = element_rect(fill = 'white', color = 'white')  # Make background white
+  )
+
+# Display the combined plot
+print(combined_plot)
+
+```
+## Saving the preprocessed dataset for next parts.
+```{r}
+train_dataset %>% readr::write_rds("my_train_data.rds")
+df %>% readr::write_rds("df.rds")
+```
+
+
+
