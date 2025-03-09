@@ -1,3 +1,5 @@
+![PPGPaints](https://github.com/user-attachments/assets/833b6a9b-5dd9-45db-b3c9-6927a3d4d1e4)
+
 # Machine Learning Project: Predicting and Classifying Paint Color Trends  
 
 ## Overview  
